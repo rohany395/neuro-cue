@@ -34,7 +34,15 @@ neuro-cue/
 
 ## License
 
-CC BY-NC 4.0 — inherited from TRIBE v2. Educational and academic use permitted; no commercial use.
+This project is licensed under [CC BY-NC 4.0](./LICENSE) — inherited from
+[Meta's TRIBE v2](https://huggingface.co/facebook/tribev2).
+
+**Permitted:** academic research, classroom instruction, personal learning,
+non-profit use.
+**Not permitted:** commercial products, paid services, clinical software.
+
+This is a research/educational tool. It is **not a medical device** and is
+not intended for clinical decision-making.
 
 ## Acknowledgments
 
