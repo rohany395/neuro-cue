@@ -1,9 +1,15 @@
 import { useState, useEffect } from "react";
 import { checkHealth } from "./services/api";
+import { usePrediction } from "./hooks/usePrediction";
+import FileUpload from "./components/FileUpload";
+import LoadingState from "./components/LoadingState";
+import ResultsRaw from "./components/ResultsRaw";
 
 function App() {
   const [backendStatus, setBackendStatus] = useState("checking...");
   const [mockMode, setMockMode] = useState(null);
+  const { file, isLoading, result, error, runPrediction, reset } =
+    usePrediction();
 
   useEffect(() => {
     checkHealth()
@@ -11,8 +17,7 @@ function App() {
         setBackendStatus("✅ Connected");
         setMockMode(data.mock_mode);
       })
-      .catch((err) => {
-        console.error(err);
+      .catch(() => {
         setBackendStatus("❌ Backend unreachable");
       });
   }, []);
@@ -40,18 +45,47 @@ function App() {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="bg-white rounded-2xl shadow-sm border p-12 text-center">
-          <div className="text-5xl mb-4">🧠</div>
-          <h2 className="text-3xl font-bold text-slate-900 mb-3">
-            Welcome to Neuro cue
-          </h2>
-          <p className="text-slate-600 max-w-xl mx-auto mb-8">
-            An educational research tool for predicting how speech therapy
-            stimuli engage clinically relevant language regions of the brain.
-          </p>
-        </div>
+      {/* Main */}
+      <main className="max-w-4xl mx-auto px-6 py-12 space-y-6">
+        {/* Empty state */}
+        {!file && !isLoading && !result && (
+          <>
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-slate-900 mb-2">
+                Upload a stimulus
+              </h2>
+              <p className="text-slate-600">
+                Get predicted engagement scores for Broca's, Wernicke's, SMA,
+                and Angular Gyrus
+              </p>
+            </div>
+            <FileUpload onFileSelected={runPrediction} disabled={isLoading} />
+          </>
+        )}
+
+        {/* Loading state */}
+        {isLoading && <LoadingState filename={file?.name} />}
+
+        {/* Error state */}
+        {error && !isLoading && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
+            <p className="font-semibold text-red-900 mb-1">
+              Prediction failed
+            </p>
+            <p className="text-sm text-red-700 mb-4">{error}</p>
+            <button
+              onClick={reset}
+              className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {/* Results */}
+        {result && !isLoading && (
+          <ResultsRaw result={result} onReset={reset} />
+        )}
       </main>
 
       <footer className="text-center text-xs text-slate-400 py-6">
