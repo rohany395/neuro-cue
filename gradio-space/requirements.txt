@@ -1,0 +1,18 @@
+# TRIBE v2 — main dependency
+tribev2[plotting] @ git+https://github.com/facebookresearch/tribev2.git
+
+# ZeroGPU support
+spaces>=0.19.4
+
+# Headless visualization
+matplotlib>=3.8.0
+plotly>=5.18.0
+
+# HF auth
+huggingface_hub>=0.23.0
+
+# Required: tribev2 uses uvx internally for WhisperX
+uv>=0.4.0
+
+# Brain atlas
+nilearn>=0.11.0

@@ -84,7 +84,7 @@ function App() {
 
         {/* Results */}
         {result && !isLoading && (
-          <ResultsRaw result={result} onReset={reset} />
+          <ResultsRaw file={file} result={result} onReset={reset} />
         )}
       </main>
 
