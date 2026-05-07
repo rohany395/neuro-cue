@@ -11,13 +11,8 @@
   },
   "dependencies": {
     "@gradio/client": "^2.2.0",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
-    "axios": "^1.15.2",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "recharts": "^3.8.1",
-    "three": "^0.184.0"
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
