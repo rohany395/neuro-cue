@@ -3,10 +3,18 @@
 > **Neural Stimulus Optimizer for Speech-Language Pathology**
 > Brain-encoding model for predicting neural engagement to therapy stimuli.
 
-[![Live Demo](https://img.shields.io/badge/HF_Spaces-Live_Demo-blue)](https://huggingface.co/spaces/rohany395/neuro-cue)
+[![Live App](https://img.shields.io/badge/Vercel-Live_App-black?logo=vercel)](https://neuro-cue.vercel.app)
+[![Hugging Face](https://img.shields.io/badge/HF_Space-Live_Demo-yellow?logo=huggingface)](https://huggingface.co/spaces/rohany395/neuro-cue)
 [![License](https://img.shields.io/badge/License-CC_BY--NC_4.0-lightgrey)](LICENSE)
 
-🔗 **[Live Demo on Hugging Face Spaces →](https://huggingface.co/spaces/rohany395/neuro-cue)**
+## 🚀 Live Demos
+
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Web App** | [neuro-cue.vercel.app](https://neuro-cue.vercel.app) | Custom React frontend on Vercel |
+| **Gradio Demo** | [huggingface.co/spaces/rohany395/neuro-cue](https://huggingface.co/spaces/rohany395/neuro-cue) | Full Gradio interface with 3D brain visualization |
+
+Both interfaces call the same inference backend running real TRIBE v2 on Hugging Face's ZeroGPU (free tier).
 
 ---
 
@@ -18,47 +26,80 @@ Resonate predicts which language regions of the brain (Broca's, Wernicke's, SMA,
 
 ## Why This Matters
 
-SLP curriculum and clinical training often relies on intuition or expensive fMRI studies to evaluate stimulus design. Resonate gives clinicians and educators an instant, free preview of which brain regions a stimulus is likely to engage — based on a state-of-the-art foundation model trained on 700+ subjects' fMRI data.
+SLP curriculum and clinical training often rely on intuition or expensive fMRI studies to evaluate stimulus design. Resonate gives clinicians and educators an instant, free preview of which brain regions a stimulus is likely to engage — based on a state-of-the-art foundation model trained on 700+ subjects' fMRI data.
 
 ## How It Works
 
-1. **Input:** Upload a video, audio, or text sample (a therapy stimulus)
+1. **Input:** Submit a video, audio, or text sample (a therapy stimulus)
 2. **Inference:** TRIBE v2 predicts BOLD response across 20,484 cortical vertices
 3. **Clinical layer:** Predictions are mapped to four language ROIs using the Destrieux atlas
 4. **Visualization:** Interactive 3D brain heatmap + ROI score breakdown
 
 ## Architecture
+┌──────────────────────────────────────────────────────────────────┐
+│  Vercel (Frontend)                                               │
+│  ┌────────────────────────────────────────────────┐              │
+│  │  React + Vite + Tailwind                       │              │
+│  │  @gradio/client → calls inference backend      │              │
+│  └────────────────────────────────────────────────┘              │
+└──────────────────────────┬───────────────────────────────────────┘
+│
+▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Hugging Face Spaces — ZeroGPU (Free Tier)                       │
+│                                                                  │
+│   Gradio UI ──┐                                                  │
+│               ├──► TRIBE v2 (LLaMA 3.2 + V-JEPA2 + Wav2Vec-BERT) │
+│   API call ──┘    │                                              │
+│                   ▼                                              │
+│              Clinical ROI scoring (Destrieux atlas)              │
+│                   │                                              │
+│                   ▼                                              │
+│              3D brain visualization (Plotly)                     │
+└──────────────────────────────────────────────────────────────────┘
 
-The deployed app runs on Hugging Face Spaces with ZeroGPU (free, queue-based GPU access):
-┌─────────────────────────────────────────────────┐
-│  Hugging Face Spaces (ZeroGPU - Free Tier)      │
-│                                                 │
-│   Gradio UI                                     │
-│      ↓                                          │
-│   TRIBE v2 (LLaMA + V-JEPA2 + Wav2Vec-BERT)     │
-│      ↓                                          │
-│   Clinical ROI scoring                          │
-│      ↓                                          │
-│   3D brain visualization (Plotly)               │
-└─────────────────────────────────────────────────┘
+## Validation
+
+The deployed inference pipeline was validated with three structured tests:
+
+1. **Sensitivity:** Different inputs ("The cat sat on the mat" vs. "Quantum entanglement violates locality assumptions") produce different ROI activation patterns.
+2. **Determinism:** The same input produces near-identical peak ROI activations across runs (Broca/Wernicke/SMA peaks byte-identical).
+3. **Plausibility:** Activation pattern for text stimuli matches neuroscience expectations: Wernicke's > Broca's > SMA > Angular Gyrus.
 
 ## Repository Structure
+.
+├── gradio-space/        # Live HF Spaces deployment (Gradio + ZeroGPU)
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── packages.txt
+│   └── README.md
+├── frontend/            # React + Vite frontend (deployed on Vercel)
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   └── services/api.js
+│   └── package.json
+├── notebooks/           # Colab exploration of TRIBE v2
+├── docs/
+└── LICENSE
+
 ## Tech Stack
 
 **Inference & ML:**
 - [TRIBE v2](https://huggingface.co/facebook/tribev2) (Meta's brain encoder, 2026)
 - LLaMA 3.2-3B, V-JEPA2, Wav2Vec-BERT (TRIBE's frozen encoders)
 - PyTorch + ZeroGPU (Hugging Face's serverless GPU)
-
-**Deployment:**
-- Gradio 6.10 (UI + auto-generated API)
 - nilearn (Destrieux atlas, fsaverage5 mesh)
 - Plotly (3D brain visualization)
 
-**Frontend (React variant, in progress):**
+**Backend (deployed):**
+- Gradio 6.10 on Hugging Face Spaces
+
+**Frontend (deployed):**
 - React 18 + Vite + TailwindCSS
-- @react-three/fiber + drei (3D visualization)
-- Recharts (temporal engagement charts)
+- @gradio/client (programmatic Space API access)
+- Deployed on Vercel
 
 ## What I Built vs. What I Used
 
@@ -70,9 +111,30 @@ The deployed app runs on Hugging Face Spaces with ZeroGPU (free, queue-based GPU
 **Built:**
 - Clinical ROI scoring layer (Destrieux atlas → 4 SLP-relevant regions)
 - Interactive 3D brain visualization with timestep slider
-- Custom UI design and information hierarchy
-- Deployment pipeline targeting ZeroGPU
-- React + Three.js alternative frontend (in `/frontend`)
+- Custom React frontend with @gradio/client integration
+- Two-interface architecture (Gradio + React) calling shared inference backend
+- Deployment pipeline: ZeroGPU + Vercel + GitHub
+- Validation methodology (sensitivity, determinism, plausibility tests)
+
+## Local Development
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+# Add your HF token to .env.local for authenticated quota
+npm run dev
+```
+
+### Gradio Space
+
+```bash
+cd gradio-space
+pip install -r requirements.txt
+python app.py
+```
 
 ## Citation
 
