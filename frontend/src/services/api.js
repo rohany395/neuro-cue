@@ -1,32 +1,60 @@
-import axios from "axios";
+import { Client } from "@gradio/client";
 
-const API_BASE_URL = "http://localhost:8000";
+// Public Gradio Space URL
+const SPACE_URL =
+  import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
 
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 60000, // 60s — TRIBE v2 inference can be slow
-});
+// Optional HF token for personal quota (set in .env.local)
+const HF_TOKEN = import.meta.env.VITE_HF_TOKEN;
+
+let _clientPromise = null;
 
 /**
- * Health check — confirms backend is reachable.
+ * Lazy-init the Gradio client. Reuses the same connection.
+ */
+function getClient() {
+  if (!_clientPromise) {
+    const opts = HF_TOKEN ? { token: HF_TOKEN } : {};
+    _clientPromise = Client.connect(SPACE_URL, opts);
+  }
+  return _clientPromise;
+}
+
+/**
+ * Health check - pings the Space root.
  */
 export async function checkHealth() {
-  const response = await apiClient.get("/health");
-  return response.data;
+  try {
+    const res = await fetch(SPACE_URL);
+    if (res.ok) return { status: "connected", mock_mode: false };
+    return { status: "error" };
+  } catch {
+    return { status: "error" };
+  }
 }
 
 /**
- * Upload a stimulus and get brain prediction back.
- * @param {File} file - The video/audio/text file to analyze
+ * Submit a stimulus and get brain prediction back.
  */
-export async function predictStimulus(file) {
-  const formData = new FormData();
-  formData.append("file", file);
+export async function predictStimulus({
+  modality = "Text",
+  text = "",
+  audioFile = null,
+  videoFile = null,
+  nTimesteps = 10,
+  vmin = 0.5,
+}) {
+  const client = await getClient();
 
-  const response = await apiClient.post("/predict", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+  const result = await client.predict("/predict", {
+    input_type: modality,
+    video_file: videoFile,
+    audio_file: audioFile,
+    text_input: text,
+    n_timesteps: nTimesteps,
+    vmin_val: vmin,
   });
-  return response.data;
-}
 
-export default apiClient;
+  const [brainHtml, clinicalHtml, statusMd] = result.data;
+  return { brainHtml, clinicalHtml, status: statusMd };
+}

@@ -2,33 +2,28 @@ import { useState } from "react";
 import { predictStimulus } from "../services/api";
 
 /**
- * Manages the prediction lifecycle:
- *   - file selected
- *   - loading state during inference
- *   - results
- *   - errors
+ * Manages the prediction lifecycle: input → loading → result/error.
  */
 export function usePrediction() {
-  const [file, setFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [lastInput, setLastInput] = useState(null);
 
-  async function runPrediction(uploadedFile) {
-    setFile(uploadedFile);
+  async function runPrediction(input) {
+    setLastInput(input);
     setIsLoading(true);
     setError(null);
     setResult(null);
 
     try {
-      const data = await predictStimulus(uploadedFile);
+      const data = await predictStimulus(input);
       setResult(data);
     } catch (err) {
       console.error("Prediction failed:", err);
       const message =
-        err.response?.data?.detail ||
-        err.message ||
-        "Something went wrong. Check that the backend is running.";
+        err?.message ||
+        "Prediction failed. The Space may be cold-starting — try again in 30 seconds.";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -36,11 +31,11 @@ export function usePrediction() {
   }
 
   function reset() {
-    setFile(null);
     setIsLoading(false);
     setResult(null);
     setError(null);
+    setLastInput(null);
   }
 
-  return { file, isLoading, result, error, runPrediction, reset };
+  return { lastInput, isLoading, result, error, runPrediction, reset };
 }
