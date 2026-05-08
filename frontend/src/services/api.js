@@ -1,17 +1,12 @@
 import { Client } from "@gradio/client";
 
-// Public Gradio Space URL
 const SPACE_URL =
   import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
 
-// Optional HF token for personal quota (set in .env.local)
 const HF_TOKEN = import.meta.env.VITE_HF_TOKEN;
 
 let _clientPromise = null;
 
-/**
- * Lazy-init the Gradio client. Reuses the same connection.
- */
 function getClient() {
   if (!_clientPromise) {
     const opts = HF_TOKEN ? { token: HF_TOKEN } : {};
@@ -20,9 +15,6 @@ function getClient() {
   return _clientPromise;
 }
 
-/**
- * Health check - pings the Space root.
- */
 export async function checkHealth() {
   try {
     const res = await fetch(SPACE_URL);
@@ -34,27 +26,34 @@ export async function checkHealth() {
 }
 
 /**
- * Submit a stimulus and get brain prediction back.
+ * Submit a text stimulus and get structured prediction back.
+ *
+ * @param {Object} input
+ * @param {string} input.text
+ * @param {number} [input.nTimesteps=10]
+ * @returns {Promise<{
+ *   success: boolean,
+ *   metadata: {n_timesteps: number, n_vertices: number, tr_seconds: number, stimulus_type: string},
+ *   roi_scores: Array<{roi_key, roi_name, function, peak, mean, n_vertices, engagement_level}>,
+ *   temporal_scores: Array<{timestep, time_seconds, broca, wernicke, sma, angular}>,
+ *   brain_html: string,
+ * }>}
  */
-export async function predictStimulus({
-  modality = "Text",
-  text = "",
-  audioFile = null,
-  videoFile = null,
-  nTimesteps = 10,
-  vmin = 0.5,
-}) {
+export async function predictStimulus({ text = "", nTimesteps = 10 }) {
   const client = await getClient();
 
-  const result = await client.predict("/predict", {
-    input_type: modality,
-    video_file: videoFile,
-    audio_file: audioFile,
-    text_input: text,
+  const result = await client.predict("/predict_json", {
+    text,
     n_timesteps: nTimesteps,
-    vmin_val: vmin,
   });
 
-  const [brainHtml, clinicalHtml, statusMd] = result.data;
-  return { brainHtml, clinicalHtml, status: statusMd };
+  // gr.api() wraps the dict in result.data[0]
+  const data = result.data?.[0];
+  if (!data) {
+    throw new Error("No data returned from inference");
+  }
+  if (data.success === false) {
+    throw new Error(data.error || "Prediction failed");
+  }
+  return data;
 }

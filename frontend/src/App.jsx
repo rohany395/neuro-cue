@@ -29,7 +29,7 @@ function App() {
 
   const handleSubmit = () => {
     if (!text.trim()) return;
-    runPrediction({ modality: "Text", text, nTimesteps: 10, vmin: 0.5 });
+    runPrediction({ text, nTimesteps: 10 });
   };
 
   return (
