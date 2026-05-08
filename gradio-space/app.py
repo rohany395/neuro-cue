@@ -173,7 +173,7 @@ def format_clinical_insights(scores: dict) -> str:
 
 
 # ── 3-D brain figure ──────────────────────────────────────────────────────────
-def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.5) -> str:
+def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
     """Interactive 3D brain heatmap (adapted from beta3)."""
     import plotly.graph_objects as go
     import html as _html
@@ -182,7 +182,7 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.5) -> str:
     n_verts_L = coords_L.shape[0]
     n_t = preds.shape[0]
 
-    vmax = np.percentile(preds, 99)
+    vmax = np.percentile(preds, 95)
     vmin = vmin_val
     BG = "#1a1a2e"
 
@@ -208,7 +208,7 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.5) -> str:
 
     def _traces(t):
         vn = _vals(t)
-        offset = 8.0
+        offset = 0.0
         tL = go.Mesh3d(
             x=coords_L[:, 0] - offset, y=coords_L[:, 1], z=coords_L[:, 2],
             i=faces_L[:, 0], j=faces_L[:, 1], k=faces_L[:, 2],
@@ -249,7 +249,7 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.5) -> str:
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
                 zaxis=dict(visible=False),
-                camera=dict(eye=dict(x=0, y=-1.9, z=0.4), up=dict(x=0, y=0, z=1)),
+                camera=dict(eye=dict(x=2.0, y=0, z=0), up=dict(x=0, y=0, z=1)),
                 aspectmode="data",
             ),
             margin=dict(l=0, r=0, t=8, b=70),
@@ -270,6 +270,162 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.5) -> str:
             f'style="width:100%;height:520px;border:none;background:{BG};" '
             f'scrolling="no"></iframe>')
 
+# ── JSON API endpoint (for React frontend) ───────────────────────────────────
+@spaces.GPU(duration=300)
+def predict_json(
+    text: str = "",
+    n_timesteps: int = 10,
+    video: gr.File | None = None,
+) -> dict:
+    """
+    JSON API endpoint for external clients (React frontend).
+    Accepts EITHER text input OR a video file. Returns ROI scores +
+    per-timestep temporal data + brain HTML.
+    """
+    import traceback
+    try:
+        print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
+        model = _load_model()
+        print("🔵 [predict_json] Model loaded")
+
+        # Build events dataframe based on input type
+        if video is not None:
+            print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
+            print(f"🔵 [predict_json] Video input value: {video!r}")
+            
+            if isinstance(video, dict):
+                # Try multiple possible keys
+                video_path = (
+                    video.get("path")
+                    or video.get("url")
+                    or video.get("orig_name")
+                )
+                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
+            elif isinstance(video, str):
+                video_path = video
+            elif hasattr(video, "name"):
+                video_path = video.name
+            else:
+                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
+            
+            print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
+            
+            if not video_path:
+                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
+            
+            # TRIBE validates by extension. Gradio uploads strip the extension
+            # (saves as /tmp/gradio/.../blob), so we need to add one back.
+            # Try to detect from orig_name first, fall back to .mp4.
+            import shutil
+            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
+                orig_name = video.get("orig_name") if isinstance(video, dict) else None
+                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
+                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
+                else:
+                    # Default to .mp4 — most common case for browser uploads
+                    ext = ".mp4"
+                
+                new_path = video_path + ext
+                shutil.copy(video_path, new_path)
+                video_path = new_path
+                print(f"🔵 [predict_json] Renamed for extension: {video_path}")
+            
+            df = model.get_events_dataframe(video_path=video_path)
+            stimulus_type = "video"
+        elif text and text.strip():
+            print("🔵 [predict_json] Using text")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
+                tmp.write(text.strip())
+                fpath = tmp.name
+            try:
+                df = model.get_events_dataframe(text_path=fpath)
+            finally:
+                os.unlink(fpath)
+            stimulus_type = "text"
+        else:
+            return {"success": False, "error": "Provide either text or video input."}
+
+        print(f"🔵 [predict_json] Events dataframe: {len(df)} rows")
+
+        # ZeroGPU DataLoader patch
+        import torch.utils.data
+        _orig = torch.utils.data.DataLoader.__init__
+        def _patched(self, *a, **kw):
+            kw["num_workers"] = 0
+            _orig(self, *a, **kw)
+        torch.utils.data.DataLoader.__init__ = _patched
+
+        try:
+            preds, segments = model.predict(events=df)
+        finally:
+            torch.utils.data.DataLoader.__init__ = _orig
+
+        if hasattr(preds, "cpu"):
+            preds = preds.cpu().numpy()
+
+        n = min(int(n_timesteps), len(preds))
+        if n == 0:
+            return {"success": False, "error": "Model returned no predictions."}
+
+        preds_n = preds[:n]
+        brain_html = build_3d_figure(preds_n, vmin_val=0.5)
+        print(f"🔵 [predict_json] Brain HTML generated ({len(brain_html)} bytes)")
+
+        roi_scores = compute_roi_scores(preds_n)
+
+        # Per-timestep ROI scores
+        masks = _load_roi_masks()
+        n_lh_verts = 10242
+        lh_preds = preds_n[:, :n_lh_verts]
+        temporal_scores = []
+        for t in range(n):
+            ts_point = {
+                "timestep": int(t),
+                "time_seconds": float(t * 1.0),
+            }
+            for roi_key, vertex_indices in masks.items():
+                valid_idx = vertex_indices[vertex_indices < n_lh_verts]
+                if len(valid_idx) > 0:
+                    ts_point[roi_key] = float(lh_preds[t, valid_idx].mean())
+                else:
+                    ts_point[roi_key] = 0.0
+            temporal_scores.append(ts_point)
+
+        # ROI recommendations
+        recommendations = []
+        for roi_key, scores in roi_scores.items():
+            roi_def = ROI_DEFINITIONS[roi_key]
+            peak = scores["peak"]
+            level = "high" if peak > 1.0 else ("moderate" if peak > 0.3 else "low")
+            recommendations.append({
+                "roi_key": roi_key,
+                "roi_name": roi_def["label"],
+                "function": roi_def["function"],
+                "peak": float(peak),
+                "mean": float(scores["mean"]),
+                "n_vertices": int(scores["n_vertices"]),
+                "engagement_level": level,
+            })
+
+        result = {
+            "success": True,
+            "metadata": {
+                "n_timesteps": int(n),
+                "n_vertices": int(preds.shape[1]),
+                "tr_seconds": 1.0,
+                "stimulus_type": stimulus_type,
+            },
+            "roi_scores": recommendations,
+            "temporal_scores": temporal_scores,
+            "brain_html": brain_html,
+        }
+        print(f"🟢 [predict_json] Returning {len(recommendations)} ROIs, {len(temporal_scores)} timesteps")
+        return result
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"🔴 [predict_json] EXCEPTION: {e}\n{tb}")
+        return {"success": False, "error": str(e), "traceback": tb}
 
 # ── Core inference (GPU-decorated) ────────────────────────────────────────────
 @spaces.GPU(duration=300)
@@ -485,7 +641,7 @@ with gr.Blocks() as demo:
                 </div>
             """)
 
-        # Right col: clinical insights (your unique addition!)
+        # Right col: clinical insights
         with gr.Column(scale=1, elem_classes=["tribe-box"]):
             gr.Markdown("### Clinical Insights")
             gr.Markdown("*Language ROI scores (left hemisphere)*",
@@ -518,8 +674,11 @@ with gr.Blocks() as demo:
         inputs=[input_type, video_file, audio_file, text_input,
                 n_timesteps, vmin_slider],
         outputs=[brain_3d, clinical_panel, status_md],
-        api_name="predict",  # Exposes /api/predict for React frontend
+        api_name="predict",
     )
+
+    # ─── JSON API for external clients (React frontend) ───────────────────────
+    gr.api(predict_json, api_name="predict_json")
 
 
 demo.launch(
