@@ -6,6 +6,7 @@ import {
     CartesianGrid,
     Tooltip,
     Legend,
+    ReferenceLine,
     ResponsiveContainer,
   } from "recharts";
   
@@ -23,7 +24,7 @@ import {
     angular: "Angular",
   };
   
-  export default function EngagementChart({ temporalScores }) {
+  export default function EngagementChart({ temporalScores, currentTime }) {
     if (!temporalScores || temporalScores.length === 0) {
       return null;
     }
@@ -35,6 +36,11 @@ import {
         </h2>
         <p className="text-xs text-slate-500 mb-4">
           Predicted ROI activation across timesteps (1.5s per step)
+          {typeof currentTime === "number" && (
+            <span className="ml-2 font-mono text-slate-700">
+              ● t = {currentTime.toFixed(1)}s
+            </span>
+          )}
         </p>
   
         <ResponsiveContainer width="100%" height={280}>
@@ -89,8 +95,17 @@ import {
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 activeDot={{ r: 5 }}
+                isAnimationActive={false}
               />
             ))}
+            {typeof currentTime === "number" && (
+              <ReferenceLine
+                x={currentTime}
+                stroke="#0f172a"
+                strokeWidth={2}
+                strokeDasharray="0"
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>

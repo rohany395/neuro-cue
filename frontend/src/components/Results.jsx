@@ -1,4 +1,6 @@
+import { useState, useMemo } from "react";
 import EngagementChart from "./EngagementChart";
+import VideoPlayer from "./VideoPlayer";
 
 const ENGAGEMENT_COLORS = {
   high: "text-emerald-600",
@@ -12,14 +14,24 @@ const ENGAGEMENT_LABELS = {
   low: "Low",
 };
 
-export default function Results({ result, onReset }) {
+export default function Results({ result, lastInput, onReset }) {
+  const [currentTime, setCurrentTime] = useState(0);
+
+  // Build a blob URL for the uploaded video file (so we can replay it)
+  const videoSrc = useMemo(() => {
+    if (lastInput?.modality === "video" && lastInput?.videoFile) {
+      return URL.createObjectURL(lastInput.videoFile);
+    }
+    return null;
+  }, [lastInput]);
+
   if (!result) return null;
 
   const { brain_html, roi_scores, temporal_scores, metadata } = result;
+  const showVideo = videoSrc !== null;
 
   return (
     <div className="space-y-6">
-      {/* Status bar */}
       <div className="text-xs text-slate-500 font-mono">
         ✓ {metadata.n_timesteps} timesteps × {metadata.n_vertices.toLocaleString()} vertices
         {" | "}
@@ -28,10 +40,21 @@ export default function Results({ result, onReset }) {
         Stimulus: {metadata.stimulus_type}
       </div>
 
-      {/* Top row: brain + ROI cards */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Brain heatmap */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-4">
+      {/* Top: Video (if any) | Brain heatmap */}
+      <div className={`grid ${showVideo ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-6`}>
+        {showVideo && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <h2 className="text-sm font-semibold text-slate-900 mb-3">
+              Stimulus Video
+            </h2>
+            <VideoPlayer src={videoSrc} onTimeUpdate={setCurrentTime} />
+            <p className="text-xs text-slate-500 mt-2">
+              The chart cursor below tracks playback time.
+            </p>
+          </div>
+        )}
+
+        <div className={`${showVideo ? "" : "lg:col-span-2"} bg-white rounded-2xl border border-slate-200 p-4`}>
           <h2 className="text-sm font-semibold text-slate-900 mb-3">
             Cortical Activation Map
           </h2>
@@ -40,50 +63,41 @@ export default function Results({ result, onReset }) {
             dangerouslySetInnerHTML={{ __html: brain_html }}
           />
         </div>
-
-        {/* ROI cards */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <h2 className="text-sm font-semibold text-slate-900 mb-1">
-            Clinical Insights
-          </h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Language ROI scores (left hemisphere)
-          </p>
-          <div className="space-y-3">
-            {roi_scores.map((roi) => (
-              <div
-                key={roi.roi_key}
-                className="border border-slate-200 rounded-lg p-3"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-semibold text-slate-900">
-                    {roi.roi_name}
-                  </span>
-                  <span
-                    className={`text-xs font-medium ${
-                      ENGAGEMENT_COLORS[roi.engagement_level]
-                    }`}
-                  >
-                    ● {ENGAGEMENT_LABELS[roi.engagement_level]}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mb-2 leading-relaxed">
-                  {roi.function}
-                </p>
-                <div className="flex gap-3 text-xs font-mono text-slate-600">
-                  <span>peak: <b>{roi.peak >= 0 ? "+" : ""}{roi.peak.toFixed(3)}</b></span>
-                  <span>mean: <b>{roi.mean >= 0 ? "+" : ""}{roi.mean.toFixed(3)}</b></span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
-      {/* Temporal chart - full width */}
-      <EngagementChart temporalScores={temporal_scores} />
+      {/* ROI cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {roi_scores.map((roi) => (
+          <div
+            key={roi.roi_key}
+            className="bg-white border border-slate-200 rounded-xl p-4"
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-semibold text-slate-900">
+                {roi.roi_name}
+              </span>
+              <span
+                className={`text-xs font-medium ${
+                  ENGAGEMENT_COLORS[roi.engagement_level]
+                }`}
+              >
+                ● {ENGAGEMENT_LABELS[roi.engagement_level]}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mb-2 leading-relaxed">
+              {roi.function}
+            </p>
+            <div className="flex gap-3 text-xs font-mono text-slate-600">
+              <span>peak: <b>{roi.peak >= 0 ? "+" : ""}{roi.peak.toFixed(3)}</b></span>
+              <span>mean: <b>{roi.mean >= 0 ? "+" : ""}{roi.mean.toFixed(3)}</b></span>
+            </div>
+          </div>
+        ))}
+      </div>
 
-      {/* Reset button */}
+      {/* Temporal chart with cursor */}
+      <EngagementChart temporalScores={temporal_scores} currentTime={showVideo ? currentTime : undefined} />
+
       <div className="flex justify-center pt-2">
         <button
           onClick={onReset}

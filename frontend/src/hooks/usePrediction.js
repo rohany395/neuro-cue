@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { predictStimulus } from "../services/api";
 
-/**
- * Manages the prediction lifecycle: input → loading → result/error.
- */
 export function usePrediction() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);

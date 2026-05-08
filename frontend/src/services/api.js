@@ -1,4 +1,4 @@
-import { Client } from "@gradio/client";
+import { Client, handle_file } from "@gradio/client";
 
 const SPACE_URL =
   import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
@@ -26,28 +26,39 @@ export async function checkHealth() {
 }
 
 /**
- * Submit a text stimulus and get structured prediction back.
+ * Submit a stimulus (text OR video) and get structured prediction back.
  *
  * @param {Object} input
- * @param {string} input.text
+ * @param {"text"|"video"} input.modality
+ * @param {string} [input.text]
+ * @param {File} [input.videoFile]
  * @param {number} [input.nTimesteps=10]
- * @returns {Promise<{
- *   success: boolean,
- *   metadata: {n_timesteps: number, n_vertices: number, tr_seconds: number, stimulus_type: string},
- *   roi_scores: Array<{roi_key, roi_name, function, peak, mean, n_vertices, engagement_level}>,
- *   temporal_scores: Array<{timestep, time_seconds, broca, wernicke, sma, angular}>,
- *   brain_html: string,
- * }>}
  */
-export async function predictStimulus({ text = "", nTimesteps = 10 }) {
+export async function predictStimulus({
+  modality = "text",
+  text = "",
+  videoFile = null,
+  nTimesteps = 10,
+}) {
   const client = await getClient();
 
-  const result = await client.predict("/predict_json", {
-    text,
-    n_timesteps: nTimesteps,
-  });
+  let payload;
+  if (modality === "video" && videoFile) {
+    payload = {
+      text: "",
+      n_timesteps: nTimesteps,
+      video: handle_file(videoFile),
+    };
+  } else {
+    payload = {
+      text,
+      n_timesteps: nTimesteps,
+      video: null,
+    };
+  }
 
-  // gr.api() wraps the dict in result.data[0]
+  const result = await client.predict("/predict_json", payload);
+
   const data = result.data?.[0];
   if (!data) {
     throw new Error("No data returned from inference");
