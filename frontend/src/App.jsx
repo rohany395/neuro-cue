@@ -42,7 +42,7 @@ function App() {
       modality,
       text,
       videoFile,
-      nTimesteps: 10,
+      nTimesteps: 100,
     });
   };
 
@@ -56,9 +56,9 @@ function App() {
       <header className="border-b bg-white">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Resonate</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Neuro Cue</h1>
             <p className="text-xs text-slate-500">
-              Neural Stimulus Optimizer for Speech-Language Pathology
+                Interactive brain-encoding visualizer · Meta TRIBE v2
             </p>
           </div>
           <div className="text-xs text-slate-500">{backendStatus}</div>
@@ -140,8 +140,7 @@ function App() {
             </button>
 
             <p className="text-xs text-slate-500">
-              First request can take 30-90 seconds (Hugging Face GPU
-              cold-start). Subsequent requests are fast.
+              Request can take upto few minutes while hugging face space is cold-starts.
             </p>
           </div>
         )}

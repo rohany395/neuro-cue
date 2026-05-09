@@ -32,10 +32,10 @@ import {
     return (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <h2 className="text-sm font-semibold text-slate-900 mb-1">
-          Engagement Over Time
+          Activation Over Time
         </h2>
         <p className="text-xs text-slate-500 mb-4">
-          Predicted ROI activation across timesteps (1.5s per step)
+          Predicted mean activation per language region across timesteps 
           {typeof currentTime === "number" && (
             <span className="ml-2 font-mono text-slate-700">
               ● t = {currentTime.toFixed(1)}s

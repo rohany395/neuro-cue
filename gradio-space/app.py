@@ -486,20 +486,22 @@ def run_prediction(input_type, video_file, audio_file, text_input,
 
 # ── HTML blocks ────────────────────────────────────────────────────────────────
 HEADER = """
-<div id="resonate-header">
-  <div class="resonate-wordmark">RESONATE</div>
-  <p class="resonate-subtitle">
-    Neural Stimulus Optimizer for Speech-Language Pathology
+<div id="neuro-cue-header">
+  <div class="neuro-cue-wordmark">NEURO CUE</div>
+  <p class="neuro-cue-subtitle">
+    Interactive brain-encoding visualizer · Meta TRIBE v2
   </p>
-  <p class="resonate-tagline">
-    Predict brain engagement from therapy stimuli using Meta's TRIBE v2 model.
-    Educational research prototype — not a medical device.
+  <p class="neuro-cue-tagline">
+    Submit a video, audio, or text stimulus and see what TRIBE v2 predicts
+    cortical activation would look like in a neurotypical adult — with
+    anatomical highlighting of canonical language regions.
+    Educational tool. Not a medical device.
   </p>
 </div>
 """
 
 NOTICE = """
-<div class="resonate-notice">
+<div class="neuro-cue-notice">
   <span class="notice-label">Note</span>
   This demo runs on ZeroGPU (shared H200). First-run model download takes ~2–4 min.
   Subsequent runs in the same session are much faster (~10s).
@@ -516,26 +518,26 @@ body, .gradio-container {
   font-family: 'Inter', system-ui, sans-serif !important;
 }
 
-#resonate-header {
+#neuro-cue-header {
   padding: 36px 0 22px;
   text-align: center;
   border-bottom: 1px solid #1a2235;
 }
-.resonate-wordmark {
+.neuro-cue-wordmark {
   font-size: 2.4rem; font-weight: 600;
   letter-spacing: 0.1em; color: #edf2ff;
   line-height: 1; margin-bottom: 10px;
 }
-.resonate-subtitle {
+.neuro-cue-subtitle {
   font-size: 0.95rem; color: #5a7aaa;
   margin: 0 0 8px; font-weight: 500;
 }
-.resonate-tagline {
+.neuro-cue-tagline {
   font-size: 0.82rem; color: #5a6a88;
   margin: 0; line-height: 1.6;
 }
 
-.resonate-notice {
+.neuro-cue-notice {
   background: #0d1120;
   border: 1px solid #1a2235;
   border-left: 3px solid #1b4f8a;

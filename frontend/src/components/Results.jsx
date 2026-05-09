@@ -28,6 +28,7 @@ export default function Results({ result, lastInput, onReset }) {
   if (!result) return null;
 
   const { brain_html, roi_scores, temporal_scores, metadata } = result;
+  const analysisWindowSec = metadata.n_timesteps * metadata.tr_seconds;
   const showVideo = videoSrc !== null;
 
   return (
@@ -42,21 +43,26 @@ export default function Results({ result, lastInput, onReset }) {
 
       {/* Top: Video (if any) | Brain heatmap */}
       <div className={`grid ${showVideo ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-6`}>
-        {showVideo && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+      {showVideo && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">
-              Stimulus Video
+            Stimulus Video
             </h2>
-            <VideoPlayer src={videoSrc} onTimeUpdate={setCurrentTime} />
+            <VideoPlayer
+            src={videoSrc}
+            onTimeUpdate={setCurrentTime}
+            maxSeconds={analysisWindowSec}
+            />
             <p className="text-xs text-slate-500 mt-2">
-              The chart cursor below tracks playback time.
+            Brain prediction covers the first {analysisWindowSec}s of the stimulus.
+            Playback stops at the analysis boundary.
             </p>
-          </div>
+        </div>
         )}
 
         <div className={`${showVideo ? "" : "lg:col-span-2"} bg-white rounded-2xl border border-slate-200 p-4`}>
           <h2 className="text-sm font-semibold text-slate-900 mb-3">
-            Cortical Activation Map
+            Predicted Cortical Activation
           </h2>
           <div
             className="w-full"

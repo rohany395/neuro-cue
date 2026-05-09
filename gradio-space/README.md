@@ -1,5 +1,5 @@
 ---
-title: Neuro Cue — Neural Stimulus Optimizer for SLP
+title: Neuro Cue — Brain encoding visualizer with language-region overlay
 emoji: 🧠
 colorFrom: indigo
 colorTo: red
@@ -14,6 +14,8 @@ short_description: TRIBE v2 brain encoding for SLP clinical insights
 
 # Neuro Cue
 
-Brain encoding model for speech-language pathology stimulus optimization. Wraps Meta's TRIBE v2 with a clinical ROI scoring layer focused on language regions (Broca's, Wernicke's, SMA, Angular Gyrus).
+Interactive visualization layer over Meta's TRIBE v2 brain encoder. Predicts cortical
+activation across 20,484 vertices and aggregates predictions over four canonical
+language regions (Broca's, Wernicke's, SMA, Angular Gyrus) using the Destrieux atlas.
 
 **Educational research prototype. Not a medical device.**

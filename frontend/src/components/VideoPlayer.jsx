@@ -1,23 +1,23 @@
 import { useRef, useEffect } from "react";
 
-/**
- * Video player that exposes currentTime via the onTimeUpdate callback.
- * The parent uses this to drive the cursor on the temporal chart.
- */
-export default function VideoPlayer({ src, onTimeUpdate }) {
+export default function VideoPlayer({ src, onTimeUpdate, maxSeconds }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !onTimeUpdate) return;
+    if (!video) return;
 
     const handleTimeUpdate = () => {
-      onTimeUpdate(video.currentTime);
+      if (maxSeconds != null && video.currentTime >= maxSeconds) {
+        video.pause();
+        video.currentTime = maxSeconds;
+      }
+      onTimeUpdate?.(Math.min(video.currentTime, maxSeconds ?? Infinity));
     };
 
     video.addEventListener("timeupdate", handleTimeUpdate);
     return () => video.removeEventListener("timeupdate", handleTimeUpdate);
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, maxSeconds]);
 
   return (
     <video

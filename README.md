@@ -1,4 +1,4 @@
-# Resonate
+# Neuro Cue
 
 > **Neural Stimulus Optimizer for Speech-Language Pathology**
 > Brain-encoding model for predicting neural engagement to therapy stimuli.
@@ -20,13 +20,13 @@ Both interfaces call the same inference backend running real TRIBE v2 on Hugging
 
 ## What It Does
 
-Resonate predicts which language regions of the brain (Broca's, Wernicke's, SMA, Angular Gyrus) are engaged when a speech-language pathology patient is exposed to a therapy stimulus — whether video, audio, or text. It wraps Meta's [TRIBE v2](https://huggingface.co/facebook/tribev2) brain-encoding model with a clinical ROI scoring layer designed for SLP educational research.
+Neuro Cue is a visualization layer over Meta's TRIBE v2 brain encoder. TRIBE v2 predicts cortical activity (BOLD signal across 20,484 vertices) in response to video, audio, and text stimuli. Neuro Cue wraps that output in an interactive 3D brain map and aggregates predictions over four anatomically-defined language regions (Broca's, Wernicke's, SMA, Angular Gyrus, mapped via the Destrieux atlas) — making the model's predictions inspectable for people learning about language neuroanatomy.
 
 **This is a research prototype. Not a medical device.**
 
 ## Why This Matters
 
-SLP curriculum and clinical training often rely on intuition or expensive fMRI studies to evaluate stimulus design. Resonate gives clinicians and educators an instant, free preview of which brain regions a stimulus is likely to engage — based on a state-of-the-art foundation model trained on 700+ subjects' fMRI data.
+SLP curriculum and clinical training often rely on intuition or expensive fMRI studies to evaluate stimulus design. Neuro Cue gives clinicians and educators an instant, free preview of which brain regions a stimulus is likely to engage — based on a state-of-the-art foundation model trained on 700+ subjects' fMRI data.
 
 ## How It Works
 
@@ -57,14 +57,6 @@ SLP curriculum and clinical training often rely on intuition or expensive fMRI s
 │                   ▼                                              │
 │              3D brain visualization (Plotly)                     │
 └──────────────────────────────────────────────────────────────────┘
-
-## Validation
-
-The deployed inference pipeline was validated with three structured tests:
-
-1. **Sensitivity:** Different inputs ("The cat sat on the mat" vs. "Quantum entanglement violates locality assumptions") produce different ROI activation patterns.
-2. **Determinism:** The same input produces near-identical peak ROI activations across runs (Broca/Wernicke/SMA peaks byte-identical).
-3. **Plausibility:** Activation pattern for text stimuli matches neuroscience expectations: Wernicke's > Broca's > SMA > Angular Gyrus.
 
 ## Repository Structure
 .
