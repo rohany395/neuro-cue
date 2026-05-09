@@ -23,6 +23,8 @@ import spaces
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
+DEFAULT_VISUALIZATION_TIMESTEPS = 10
+MAX_VISUALIZATION_TIMESTEPS = 30
 
 # Clinical ROI definitions (Destrieux atlas regions, left hemisphere only)
 # Language is left-lateralized in ~95% of right-handed individuals
@@ -172,6 +174,19 @@ def format_clinical_insights(scores: dict) -> str:
     return f'<div class="clinical-panel">{"".join(rows)}</div>'
 
 
+def _resolve_timestep_count(n_timesteps, total_timesteps: int) -> int:
+    try:
+        requested = int(n_timesteps)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_timesteps must be an integer.") from exc
+
+    if total_timesteps <= 0:
+        return 0
+
+    requested = max(1, requested)
+    return min(requested, total_timesteps, MAX_VISUALIZATION_TIMESTEPS)
+
+
 # ── 3-D brain figure ──────────────────────────────────────────────────────────
 def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
     """Interactive 3D brain heatmap (adapted from beta3)."""
@@ -274,7 +289,7 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
 @spaces.GPU(duration=300)
 def predict_json(
     text: str = "",
-    n_timesteps: int = 10,
+    n_timesteps: int = DEFAULT_VISUALIZATION_TIMESTEPS,
     video: gr.File | None = None,
 ) -> dict:
     """
@@ -363,7 +378,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = _resolve_timestep_count(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -425,7 +440,7 @@ def predict_json(
     except Exception as e:
         tb = traceback.format_exc()
         print(f"🔴 [predict_json] EXCEPTION: {e}\n{tb}")
-        return {"success": False, "error": str(e), "traceback": tb}
+        return {"success": False, "error": "Prediction failed. Please try again."}
 
 # ── Core inference (GPU-decorated) ────────────────────────────────────────────
 @spaces.GPU(duration=300)
@@ -467,7 +482,10 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    try:
+        n = _resolve_timestep_count(n_timesteps, len(preds))
+    except ValueError as exc:
+        raise gr.Error(str(exc)) from exc
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
