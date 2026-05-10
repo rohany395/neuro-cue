@@ -3,14 +3,12 @@ import { Client, handle_file } from "@gradio/client";
 const SPACE_URL =
   import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
 
-const HF_TOKEN = import.meta.env.VITE_HF_TOKEN;
-
 let _clientPromise = null;
 
 function getClient() {
   if (!_clientPromise) {
-    const opts = HF_TOKEN ? { token: HF_TOKEN } : {};
-    _clientPromise = Client.connect(SPACE_URL, opts);
+    // Vite exposes frontend env vars in the public bundle; never pass HF tokens here.
+    _clientPromise = Client.connect(SPACE_URL);
   }
   return _clientPromise;
 }
