@@ -23,6 +23,7 @@ import spaces
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
+MAX_VISUALIZATION_TIMESTEPS = 30
 
 # Clinical ROI definitions (Destrieux atlas regions, left hemisphere only)
 # Language is left-lateralized in ~95% of right-handed individuals
@@ -53,6 +54,12 @@ ROI_DEFINITIONS = {
 _model = None
 _roi_masks = None
 _mesh_cache = None
+
+
+def _clamped_timestep_count(n_timesteps: int, available_timesteps: int) -> int:
+    """Keep Plotly payloads bounded for public API callers."""
+    requested = max(1, int(n_timesteps))
+    return min(requested, MAX_VISUALIZATION_TIMESTEPS, int(available_timesteps))
 
 
 def _load_model():
@@ -363,7 +370,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = _clamped_timestep_count(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -467,7 +474,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = _clamped_timestep_count(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 

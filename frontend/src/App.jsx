@@ -10,6 +10,7 @@ const EXAMPLES = [
   "Quantum entanglement violates locality assumptions.",
   "Please pass the salt. I would like a glass of water.",
 ];
+const MAX_VISUALIZATION_TIMESTEPS = 30;
 
 function App() {
   const [backendStatus, setBackendStatus] = useState("checking...");
@@ -42,7 +43,7 @@ function App() {
       modality,
       text,
       videoFile,
-      nTimesteps: 100,
+      nTimesteps: MAX_VISUALIZATION_TIMESTEPS,
     });
   };
 
