@@ -56,6 +56,15 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TIMESTEPS = 30
+
+def _normalize_timestep_limit(requested, available: int, max_timesteps: int = MAX_TIMESTEPS) -> int:
+    """Clamp caller-controlled timestep requests before building large Plotly frames."""
+    try:
+        requested = int(requested)
+    except (TypeError, ValueError):
+        requested = max_timesteps
+    return min(max(requested, 1), int(available), max_timesteps)
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -487,7 +496,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = _normalize_timestep_limit(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -592,7 +601,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = _normalize_timestep_limit(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
