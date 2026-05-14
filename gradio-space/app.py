@@ -1,5 +1,5 @@
 """
-Resonate — Neural Stimulus Optimizer for SLP
+Neuro Cue — Neural Stimulus Optimizer for SLP
 A clinical wrapper around Meta's TRIBE v2 brain encoding model.
 Built for speech-language pathology research and education.
 """
@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 
 import gradio as gr
 import spaces
+import subprocess
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
@@ -54,6 +55,59 @@ _model = None
 _roi_masks = None
 _mesh_cache = None
 
+MAX_VIDEO_SECONDS = 15.0
+
+def _probe_duration(path: str) -> float | None:
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, check=True, timeout=15,
+        )
+        return float(out.stdout.strip())
+    except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired) as e:
+        print(f"⚠️  ffprobe failed on {path}: {e}")
+        return None
+
+
+def trim_video_if_needed(path: str, max_seconds: float = MAX_VIDEO_SECONDS) -> str:
+    """If longer than max_seconds, trim and return new path. Otherwise return path unchanged.
+    Falls back to original path on any ffmpeg failure."""
+    dur = _probe_duration(path)
+    if dur is None or dur <= max_seconds:
+        if dur is not None:
+            print(f"🔵 video {dur:.1f}s ≤ {max_seconds}s — no trim")
+        return path
+
+    base, _, ext = path.rpartition(".")
+    out_path = f"{base}_trim{int(max_seconds)}s.{ext}" if ext else f"{path}_trim.mp4"
+    print(f"🔵 trimming {dur:.1f}s → {max_seconds}s ({out_path})")
+
+    # Stream copy first (fast, no re-encode). Falls back to re-encode if keyframe placement
+    # makes -t copy fail or produce something downstream rejects.
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-ss", "0", "-i", path,
+             "-t", str(max_seconds), "-c", "copy",
+             "-avoid_negative_ts", "make_zero", out_path],
+            capture_output=True, check=True, timeout=30,
+        )
+        return out_path
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️  stream copy failed: {e.stderr.decode('utf-8', 'replace')[:300]}")
+
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", path, "-t", str(max_seconds),
+             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", out_path],
+            capture_output=True, check=True, timeout=120,
+        )
+        return out_path
+    except subprocess.CalledProcessError as e:
+        print(f"🔴 re-encode failed: {e.stderr.decode('utf-8', 'replace')[:300]}")
+        return path  # give up; downstream will handle or error
 
 def _load_model():
     """Load TRIBE v2 (only inside GPU function due to ZeroGPU)."""
@@ -76,6 +130,7 @@ def _load_roi_masks():
     if _roi_masks is None:
         from nilearn import datasets
         atlas = datasets.fetch_atlas_surf_destrieux()
+        print(atlas,"atlas log in load_roi_masks")
         # left hemisphere annotations
         labels = atlas["labels"]
         lh_map = atlas["map_left"]  # vertex → label index
@@ -97,18 +152,70 @@ def _load_roi_masks():
 
 
 def _load_mesh():
-    """Load fsaverage5 mesh for 3D visualization."""
+    """Load fsaverage5 'half-inflated' mesh + smoothing adjacency.
+    Returns 6-tuple: (coords_L, faces_L, adj_L, coords_R, faces_R, adj_R)."""
     global _mesh_cache
     if _mesh_cache is None:
-        from nilearn import datasets, surface
+        import nibabel as nib
+        from nilearn import datasets
         fsaverage = datasets.fetch_surf_fsaverage("fsaverage5")
-        coords_L, faces_L = surface.load_surf_mesh(fsaverage.pial_left)
-        coords_R, faces_R = surface.load_surf_mesh(fsaverage.pial_right)
-        _mesh_cache = (
-            np.array(coords_L), np.array(faces_L),
-            np.array(coords_R), np.array(faces_R),
-        )
+
+        ALPHA = 0.5
+        out = []
+        for hemi in ("left", "right"):
+            infl_xyz, _ = nib.load(getattr(fsaverage, f"infl_{hemi}")).darrays
+            pial_xyz, faces = nib.load(getattr(fsaverage, f"pial_{hemi}")).darrays
+            coords = infl_xyz.data * ALPHA + pial_xyz.data * (1 - ALPHA)
+            out.append((np.array(coords), np.array(faces.data)))
+
+        (coords_L, faces_L), (coords_R, faces_R) = out
+        adj_L = _build_smooth_adjacency(faces_L, len(coords_L))
+        adj_R = _build_smooth_adjacency(faces_R, len(coords_R))
+        _mesh_cache = (coords_L, faces_L, adj_L, coords_R, faces_R, adj_R)
     return _mesh_cache
+
+def _build_smooth_adjacency(faces, n_verts):
+    """Row-normalized neighbor adjacency. adj @ v gives mean of neighbors per vertex."""
+    import scipy.sparse as sp
+    e = np.concatenate([
+        faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]],
+        faces[:, [1, 0]], faces[:, [2, 1]], faces[:, [0, 2]],
+    ])
+    e = np.unique(e, axis=0)
+    adj = sp.csr_matrix(
+        (np.ones(len(e), dtype=np.float32), (e[:, 0], e[:, 1])),
+        shape=(n_verts, n_verts),
+    )
+    deg = np.asarray(adj.sum(axis=1)).flatten()
+    deg[deg == 0] = 1.0
+    return (sp.diags(1.0 / deg) @ adj).tocsr()
+
+def _smooth_on_surface(values, adj, n_iter: int = 4, alpha: float = 0.5):
+    """Laplacian smoothing. values: (n_t, n_verts) or (n_verts,)."""
+    out = values.astype(np.float32, copy=True)
+    if out.ndim == 1:
+        for _ in range(n_iter):
+            out = (1 - alpha) * out + alpha * (adj @ out)
+    else:
+        for _ in range(n_iter):
+            out = (1 - alpha) * out + alpha * (adj @ out.T).T
+    return out
+
+def _tribe_colorscale(threshold_frac: float, cmap_name: str = "hot"):
+    """Plotly colorscale matching TRIBE's get_thresholded_sm:
+    flat gray below `threshold_frac`, then matplotlib `cmap_name` above.
+    threshold_frac is in [0, 1] of the normalized data range."""
+    import matplotlib.pyplot as plt
+    cmap = plt.get_cmap(cmap_name)
+    GRAY = "rgb(128,128,128)"
+    cs = [[0.0, GRAY], [max(threshold_frac - 1e-4, 0.0), GRAY]]
+    n = 24
+    for i in range(n + 1):
+        t = i / n
+        x = threshold_frac + (1 - threshold_frac) * t
+        r, g, b, _ = cmap(t)
+        cs.append([min(x, 1.0), f"rgb({int(r*255)},{int(g*255)},{int(b*255)})"])
+    return cs
 
 
 # ── Clinical scoring ──────────────────────────────────────────────────────────
@@ -118,8 +225,11 @@ def compute_roi_scores(preds: np.ndarray) -> dict:
     preds: shape (n_timesteps, 20484) — fsaverage5 vertices
     """
     masks = _load_roi_masks()
+    print(masks,"masks log in compute_roi_scores")
     n_lh_verts = 10242  # left hemisphere has 10,242 vertices on fsaverage5
     lh_preds = preds[:, :n_lh_verts]  # only use LH (language is left-lateralized)
+
+    print(lh_preds,"lh_preds log in compute_roi_scores")
 
     scores = {}
     for roi_key, vertex_indices in masks.items():
@@ -173,32 +283,33 @@ def format_clinical_insights(scores: dict) -> str:
 
 
 # ── 3-D brain figure ──────────────────────────────────────────────────────────
-def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
-    """Interactive 3D brain heatmap (adapted from beta3)."""
+def build_3d_figure(preds: np.ndarray, threshold_frac: float = 0.3) -> str:
+    """Interactive 3D brain heatmap, TRIBE-style."""
     import plotly.graph_objects as go
     import html as _html
 
-    coords_L, faces_L, coords_R, faces_R = _load_mesh()
+    coords_L, faces_L, adj_L, coords_R, faces_R, adj_R = _load_mesh()
     n_verts_L = coords_L.shape[0]
     n_t = preds.shape[0]
 
-    vmax = np.percentile(preds, 95)
-    vmin = vmin_val
-    BG = "#1a1a2e"
+    # Smooth ONLY for visualization; ROI scoring elsewhere uses raw preds.
+    preds_L = _smooth_on_surface(preds[:, :n_verts_L], adj_L, n_iter=4, alpha=0.5)
+    preds_R = _smooth_on_surface(preds[:, n_verts_L:], adj_R, n_iter=4, alpha=0.5)
+    preds = np.concatenate([preds_L, preds_R], axis=1)
 
-    WHITE_FIRE = [
-        [0.00, "rgb(245,245,245)"],
-        [0.25, "rgb(220,180,160)"],
-        [0.45, "rgb(200,60,10)"],
-        [0.65, "rgb(240,120,0)"],
-        [0.80, "rgb(255,200,20)"],
-        [1.00, "rgb(255,255,220)"],
-    ]
+    # One-sided positive activation; robust vmax (matches TRIBE's
+    # robust_normalize default of 99th percentile).
+    vmin = 0.0
+    vmax = float(np.percentile(preds, 99))
+    threshold_frac = float(np.clip(threshold_frac, 0.0, 1.0))
+
+    BG = "#1a1a2e"
+    colorscale = _tribe_colorscale(threshold_frac, cmap_name="YlOrRd")
 
     mesh_kw = dict(
-        colorscale=WHITE_FIRE, cmin=0, cmax=1, showscale=False,
+        colorscale=colorscale, cmin=0, cmax=1, showscale=False,
         flatshading=False, hoverinfo="skip",
-        lighting=dict(ambient=0.60, diffuse=0.85, specular=0.25, roughness=0.45),
+        lighting=dict(ambient=0.40, diffuse=0.85, specular=0.20, roughness=0.55),
         lightposition=dict(x=80, y=180, z=200),
     )
 
@@ -249,7 +360,11 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
                 zaxis=dict(visible=False),
-                camera=dict(eye=dict(x=2.0, y=0, z=0), up=dict(x=0, y=0, z=1)),
+                camera=dict(
+                    eye=dict(x=-1.4, y=0, z=0),
+                    center=dict(x=-0, y=0, z=0),   # look-at shifted toward LH
+                    up=dict(x=0, y=0, z=1),
+                ),
                 aspectmode="data",
             ),
             margin=dict(l=0, r=0, t=8, b=70),
@@ -263,11 +378,20 @@ def build_3d_figure(preds: np.ndarray, vmin_val: float = 0.0) -> str:
         ),
     )
 
-    inner_html = fig.to_html(include_plotlyjs=True, full_html=True,
-                             config={"responsive": True, "displayModeBar": False})
+    inner_html = fig.to_html(
+        include_plotlyjs=True,
+        full_html=True,
+        config={
+            "responsive": True,
+            "displayModeBar": False,
+            "scrollZoom": True,
+            "doubleClick": "reset",
+        },
+    )
     srcdoc = _html.escape(inner_html, quote=True)
     return (f'<iframe srcdoc="{srcdoc}" '
-            f'style="width:100%;height:520px;border:none;background:{BG};" '
+            f'style="width:100%;height:520px;border:none;background:{BG};'
+            f'touch-action:auto;" '
             f'scrolling="no"></iframe>')
 
 # ── JSON API endpoint (for React frontend) ───────────────────────────────────
@@ -329,7 +453,7 @@ def predict_json(
                 shutil.copy(video_path, new_path)
                 video_path = new_path
                 print(f"🔵 [predict_json] Renamed for extension: {video_path}")
-            
+            video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
         elif text and text.strip():
@@ -368,7 +492,7 @@ def predict_json(
             return {"success": False, "error": "Model returned no predictions."}
 
         preds_n = preds[:n]
-        brain_html = build_3d_figure(preds_n, vmin_val=0.5)
+        brain_html = build_3d_figure(preds_n, threshold_frac=0.3)
         print(f"🔵 [predict_json] Brain HTML generated ({len(brain_html)} bytes)")
 
         roi_scores = compute_roi_scores(preds_n)
@@ -436,6 +560,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        video_file = trim_video_if_needed(video_file)
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
         df = model.get_events_dataframe(audio_path=audio_file)
@@ -474,7 +599,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     preds_n = preds[:n]
 
     # Generate outputs
-    brain_3d_html = build_3d_figure(preds_n, vmin_val=vmin_val)
+    brain_3d_html = build_3d_figure(preds_n, threshold_frac=vmin_val)
     roi_scores = compute_roi_scores(preds_n)
     clinical_html = format_clinical_insights(roi_scores)
 
@@ -626,8 +751,8 @@ with gr.Blocks() as demo:
             with gr.Accordion("Settings", open=False):
                 n_timesteps = gr.Slider(1, 30, value=10, step=1,
                                          label="Timesteps to visualize")
-                vmin_slider = gr.Slider(-0.5, 1.0, value=0.5, step=0.05,
-                                         label="Activation threshold")
+                vmin_slider = gr.Slider(0.0, 1.0, value=0.3, step=0.05,
+                         label="Activation threshold (fraction of peak)")
 
             run_btn = gr.Button("Generate Brain Prediction",
                                 elem_classes=["btn-run"])

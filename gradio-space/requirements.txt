@@ -1,5 +1,8 @@
-# TRIBE v2 — main dependency
-tribev2[plotting] @ git+https://github.com/facebookresearch/tribev2.git
+# TRIBE v2 — installed from my fork with relaxed torch upper bound
+tribev2[plotting] @ git+https://github.com/rohany395/tribev2
+
+# PyTorch (compatible with ZeroGPU Blackwell)
+torch==2.8.0
 
 # ZeroGPU support
 spaces>=0.19.4
