@@ -116,7 +116,7 @@ SLP curriculum and clinical training often rely on intuition or expensive fMRI s
 cd frontend
 npm install
 cp .env.example .env.local
-# Add your HF token to .env.local for authenticated quota
+# Optional: set VITE_SPACE_URL to point at a different public Gradio Space
 npm run dev
 ```
 
