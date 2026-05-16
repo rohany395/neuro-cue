@@ -549,7 +549,10 @@ def predict_json(
     except Exception as e:
         tb = traceback.format_exc()
         print(f"🔴 [predict_json] EXCEPTION: {e}\n{tb}")
-        return {"success": False, "error": str(e), "traceback": tb}
+        return {
+            "success": False,
+            "error": "Prediction failed. Check server logs for details.",
+        }
 
 # ── Core inference (GPU-decorated) ────────────────────────────────────────────
 @spaces.GPU(duration=300)
