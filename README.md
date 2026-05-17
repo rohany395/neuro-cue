@@ -36,29 +36,43 @@ SLP curriculum and clinical training often rely on intuition or expensive fMRI s
 4. **Visualization:** Interactive 3D brain heatmap + ROI score breakdown
 
 ## Architecture
-┌──────────────────────────────────────────────────────────────────┐
-│  Vercel (Frontend)                                               │
-│  ┌────────────────────────────────────────────────┐              │
-│  │  React + Vite + Tailwind                       │              │
-│  │  @gradio/client → calls inference backend      │              │
-│  └────────────────────────────────────────────────┘              │
-└──────────────────────────┬───────────────────────────────────────┘
-│
-▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Hugging Face Spaces — ZeroGPU (Free Tier)                       │
-│                                                                  │
-│   Gradio UI ──┐                                                  │
-│               ├──► TRIBE v2 (LLaMA 3.2 + V-JEPA2 + Wav2Vec-BERT) │
-│   API call ──┘    │                                              │
-│                   ▼                                              │
-│              Clinical ROI scoring (Destrieux atlas)              │
-│                   │                                              │
-│                   ▼                                              │
-│              3D brain visualization (Plotly)                     │
-└──────────────────────────────────────────────────────────────────┘
+
+```mermaid
+flowchart TD
+  User["User"]
+
+  subgraph Vercel["Vercel frontend"]
+    React["React + Vite + Tailwind"]
+    Client["@gradio/client"]
+    React --> Client
+  end
+
+  subgraph Space["Hugging Face Space - ZeroGPU"]
+    API["Gradio API: /predict_json"]
+    Gradio["Gradio demo UI: /predict"]
+    Inference["TRIBE v2 inference<br/>LLaMA 3.2 + V-JEPA2 + Wav2Vec-BERT"]
+    ROI["Clinical ROI scoring<br/>Destrieux atlas"]
+    Brain["3D brain visualization<br/>Plotly"]
+  end
+
+  User --> React
+  User --> Gradio
+  Client --> API
+  API --> Inference
+  Gradio --> Inference
+  Inference --> ROI
+  ROI --> Response["Structured prediction response<br/>ROI scores + metadata"]
+  ROI --> Brain
+  Brain --> Response
+  Response --> React
+  Brain --> Gradio
+```
 
 ## Repository Structure
+
+Key project files:
+
+```text
 .
 ├── gradio-space/        # Live HF Spaces deployment (Gradio + ZeroGPU)
 │   ├── app.py
@@ -71,10 +85,11 @@ SLP curriculum and clinical training often rely on intuition or expensive fMRI s
 │   │   ├── components/
 │   │   ├── hooks/
 │   │   └── services/api.js
-│   └── package.json
-├── notebooks/           # Colab exploration of TRIBE v2
-├── docs/
+│   ├── package.json
+│   └── vite.config.js
+├── README.md
 └── LICENSE
+```
 
 ## Tech Stack
 
