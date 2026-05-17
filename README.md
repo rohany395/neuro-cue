@@ -130,8 +130,8 @@ Key project files:
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local
-# Add your HF token to .env.local for authenticated quota
+# Optional: set VITE_SPACE_URL in .env.local to point at another public Space.
+# Do not put Hugging Face tokens in VITE_* variables; browser env values are public.
 npm run dev
 ```
 
