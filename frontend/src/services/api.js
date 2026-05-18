@@ -1,16 +1,6 @@
-import { Client, handle_file } from "@gradio/client";
-
 const SPACE_URL =
   import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
-
-let _clientPromise = null;
-
-function getClient() {
-  if (!_clientPromise) {
-    _clientPromise = Client.connect(SPACE_URL);
-  }
-  return _clientPromise;
-}
+const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
 
 export async function checkHealth() {
   try {
@@ -37,28 +27,24 @@ export async function predictStimulus({
   videoFile = null,
   nTimesteps = 10,
 }) {
-  const client = await getClient();
+  const formData = new FormData();
+  formData.append("modality", modality);
+  formData.append("n_timesteps", String(nTimesteps));
 
-  let payload;
   if (modality === "video" && videoFile) {
-    payload = {
-      text: "",
-      n_timesteps: nTimesteps,
-      video: handle_file(videoFile),
-    };
+    formData.append("video", videoFile);
   } else {
-    payload = {
-      text,
-      n_timesteps: nTimesteps,
-      video: null,
-    };
+    formData.append("text", text);
   }
 
-  const result = await client.predict("/predict_json", payload);
+  const res = await fetch(PREDICT_PROXY_URL, {
+    method: "POST",
+    body: formData,
+  });
 
-  const data = result.data?.[0];
-  if (!data) {
-    throw new Error("No data returned from inference");
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) {
+    throw new Error(data?.error || "Prediction failed");
   }
   if (data.success === false) {
     throw new Error(data.error || "Prediction failed");
