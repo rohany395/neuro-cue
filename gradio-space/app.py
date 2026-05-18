@@ -56,6 +56,8 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+# Keep public frontend requests within the unauthenticated ZeroGPU quota.
+ZERO_GPU_DURATION_SECONDS = 120
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -395,7 +397,7 @@ def build_3d_figure(preds: np.ndarray, threshold_frac: float = 0.3) -> str:
             f'scrolling="no"></iframe>')
 
 # ── JSON API endpoint (for React frontend) ───────────────────────────────────
-@spaces.GPU(duration=300)
+@spaces.GPU(duration=ZERO_GPU_DURATION_SECONDS)
 def predict_json(
     text: str = "",
     n_timesteps: int = 10,
@@ -555,7 +557,7 @@ def predict_json(
         }
 
 # ── Core inference (GPU-decorated) ────────────────────────────────────────────
-@spaces.GPU(duration=300)
+@spaces.GPU(duration=ZERO_GPU_DURATION_SECONDS)
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
