@@ -21,6 +21,8 @@ import gradio as gr
 import spaces
 import subprocess
 
+from inference_limits import MAX_TIMESTEPS, normalize_timestep_limit
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -489,7 +491,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = normalize_timestep_limit(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -597,7 +599,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = normalize_timestep_limit(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
@@ -754,7 +756,7 @@ with gr.Blocks() as demo:
                 )
 
             with gr.Accordion("Settings", open=False):
-                n_timesteps = gr.Slider(1, 30, value=10, step=1,
+                n_timesteps = gr.Slider(1, MAX_TIMESTEPS, value=10, step=1,
                                          label="Timesteps to visualize")
                 vmin_slider = gr.Slider(0.0, 1.0, value=0.3, step=0.05,
                          label="Activation threshold (fraction of peak)")
