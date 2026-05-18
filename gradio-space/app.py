@@ -56,7 +56,7 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
-# Keep public frontend requests within the unauthenticated ZeroGPU quota.
+# Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
 
 def _probe_duration(path: str) -> float | None:
