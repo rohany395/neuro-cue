@@ -10,6 +10,7 @@ const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
 const MAX_TEXT_CHARS = 5000;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_TIMESTEPS = 100;
+const TOKEN_CHECK_TIMEOUT_MS = 5000;
 
 let clientPromise = null;
 
@@ -26,6 +27,40 @@ function getClient() {
     clientPromise = Client.connect(SPACE_URL, { token: HF_TOKEN });
   }
   return clientPromise;
+}
+
+function setProxyHeaders(res) {
+  res.setHeader("X-Neuro-Cue-Proxy", "1");
+}
+
+async function checkHfToken() {
+  if (!HF_TOKEN) {
+    return { configured: false, valid: false };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TOKEN_CHECK_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://huggingface.co/api/whoami-v2", {
+      headers: { Authorization: `Bearer ${HF_TOKEN}` },
+      signal: controller.signal,
+    });
+
+    return {
+      configured: true,
+      valid: response.ok,
+      status: response.status,
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      valid: false,
+      error: error.name === "AbortError" ? "timeout" : "request_failed",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function singleValue(value) {
@@ -137,8 +172,20 @@ async function cleanupUpload(videoFile) {
 }
 
 export default async function handler(req, res) {
+  setProxyHeaders(res);
+
+  if (req.method === "GET") {
+    const tokenStatus = await checkHfToken();
+    return res.status(200).json({
+      success: true,
+      proxy: "neuro-cue-vercel",
+      spaceUrl: SPACE_URL,
+      hfToken: tokenStatus,
+    });
+  }
+
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
+    res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
