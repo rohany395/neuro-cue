@@ -1,6 +1,12 @@
 import { Client, handle_file } from "@gradio/client";
 import { formidable } from "formidable";
 import fs from "node:fs/promises";
+import {
+  applyCors,
+  authorizePredictRequest,
+  getPredictApiSecret,
+  handleOptions,
+} from "./lib/proxyAuth.js";
 
 const DEFAULT_SPACE_URL = "https://rohany395-neuro-cue.hf.space/";
 const SPACE_URL =
@@ -173,6 +179,11 @@ async function cleanupUpload(videoFile) {
 
 export default async function handler(req, res) {
   setProxyHeaders(res);
+  applyCors(req, res);
+
+  if (req.method === "OPTIONS") {
+    return handleOptions(req, res);
+  }
 
   if (req.method === "GET") {
     const tokenStatus = await checkHfToken();
@@ -181,12 +192,21 @@ export default async function handler(req, res) {
       proxy: "neuro-cue-vercel",
       spaceUrl: SPACE_URL,
       hfToken: tokenStatus,
+      predictAuthConfigured: Boolean(getPredictApiSecret()),
     });
   }
 
   if (req.method !== "POST") {
-    res.setHeader("Allow", "GET, POST");
+    res.setHeader("Allow", "GET, POST, OPTIONS");
     return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const authFailure = authorizePredictRequest(req);
+  if (authFailure) {
+    if (authFailure.retryAfterSec) {
+      res.setHeader("Retry-After", String(authFailure.retryAfterSec));
+    }
+    return res.status(authFailure.status).json(authFailure.body);
   }
 
   let videoFile = null;

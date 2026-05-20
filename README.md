@@ -143,14 +143,19 @@ npm run dev
 npx vercel dev
 ```
 
-The deployed Vercel API proxy reads private server-side environment variables:
+The deployed Vercel API proxy reads environment variables:
 
 ```bash
+# Server-only — never use VITE_ prefix
 HF_TOKEN=hf_...
 HF_SPACE_URL=https://rohany395-neuro-cue.hf.space/
+PREDICT_API_SECRET=<random secret, e.g. openssl rand -hex 32>
+
+# Baked into the production JS bundle at build time (same value as PREDICT_API_SECRET)
+VITE_PREDICT_API_KEY=<same as PREDICT_API_SECRET>
 ```
 
-Use `HF_TOKEN` without a `VITE_` prefix so it is never bundled into browser JavaScript.
+`HF_TOKEN` stays server-side only. `PREDICT_API_SECRET` blocks unauthenticated `curl`/scripts from driving GPU inference through your proxy; the matching `VITE_PREDICT_API_KEY` lets the public web app call `/api/predict`. Optional: `ALLOWED_ORIGINS` (comma-separated), `PREDICT_RATE_LIMIT_PER_MINUTE` (default 5), `PREDICT_RATE_LIMIT_PER_HOUR` (default 20).
 
 ### Gradio Space
 

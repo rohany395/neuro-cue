@@ -1,4 +1,13 @@
 const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
+const PREDICT_API_KEY = import.meta.env.VITE_PREDICT_API_KEY || "";
+
+function predictHeaders() {
+  const headers = {};
+  if (PREDICT_API_KEY) {
+    headers["x-neuro-cue-api-key"] = PREDICT_API_KEY;
+  }
+  return headers;
+}
 
 export async function checkHealth() {
   try {
@@ -43,11 +52,17 @@ export async function predictStimulus({
 
   const res = await fetch(PREDICT_PROXY_URL, {
     method: "POST",
+    headers: predictHeaders(),
     body: formData,
   });
 
   const data = await res.json().catch(() => null);
   if (!res.ok || !data) {
+    if (res.status === 401 && !PREDICT_API_KEY) {
+      throw new Error(
+        "Missing VITE_PREDICT_API_KEY. Copy .env.local.example and set the same value as PREDICT_API_SECRET.",
+      );
+    }
     throw new Error(data?.error || "Prediction failed");
   }
   if (data.success === false) {
