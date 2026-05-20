@@ -79,7 +79,7 @@ export default function Results({ result, lastInput, onReset }) {
             className="bg-white border border-slate-200 rounded-xl p-4"
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-semibold text-slate-900">
+              <span className="text-sm font-semibold text-slate-900 size-min">
                 {roi.roi_name}
               </span>
               <span
