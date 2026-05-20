@@ -1,11 +1,15 @@
-const SPACE_URL =
-  import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
 const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
 
 export async function checkHealth() {
   try {
-    const res = await fetch(SPACE_URL);
-    if (res.ok) return { status: "connected", mock_mode: false };
+    const res = await fetch(PREDICT_PROXY_URL);
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.success) {
+      return {
+        status: data.hfToken?.valid ? "connected" : "error",
+        mock_mode: false,
+      };
+    }
     return { status: "error" };
   } catch {
     return { status: "error" };
