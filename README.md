@@ -43,10 +43,8 @@ flowchart TD
 
   subgraph Vercel["Vercel frontend"]
     React["React + Vite + Tailwind"]
-    Proxy["Serverless API proxy<br/>/api/predict"]
-    Client["@gradio/client<br/>server-side only"]
-    React --> Proxy
-    Proxy --> Client
+    Client["@gradio/client<br/>browser-side public Space access"]
+    React --> Client
   end
 
   subgraph Space["Hugging Face Space - ZeroGPU"]
@@ -107,8 +105,7 @@ Key project files:
 
 **Frontend (deployed):**
 - React 18 + Vite + TailwindCSS
-- Vercel serverless API proxy
-- @gradio/client (server-side authenticated Space access)
+- @gradio/client (public Space access, no browser token)
 - Deployed on Vercel
 
 ## What I Built vs. What I Used
@@ -121,7 +118,7 @@ Key project files:
 **Built:**
 - Clinical ROI scoring layer (Destrieux atlas → 4 SLP-relevant regions)
 - Interactive 3D brain visualization with timestep slider
-- Custom React frontend with private server-side Hugging Face proxy
+- Custom React frontend that calls the public Hugging Face Space
 - Two-interface architecture (Gradio + React) calling shared inference backend
 - Deployment pipeline: ZeroGPU + Vercel + GitHub
 - Validation methodology (sensitivity, determinism, plausibility tests)
@@ -137,15 +134,6 @@ npm install
 # Do not put Hugging Face tokens in VITE_* variables; browser env values are public.
 npm run dev
 ```
-
-The deployed Vercel API proxy reads private server-side environment variables:
-
-```bash
-HF_TOKEN=hf_...
-HF_SPACE_URL=https://rohany395-neuro-cue.hf.space/
-```
-
-Use `HF_TOKEN` without a `VITE_` prefix so it is never bundled into browser JavaScript.
 
 ### Gradio Space
 
