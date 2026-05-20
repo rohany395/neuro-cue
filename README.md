@@ -133,9 +133,14 @@ Key project files:
 ```bash
 cd frontend
 npm install
-# Optional: set VITE_SPACE_URL in .env.local to point at another public Space.
-# Do not put Hugging Face tokens in VITE_* variables; browser env values are public.
+cp .env.local.example .env.local   # then add HF_TOKEN for full local API
 npm run dev
+```
+
+`npm run dev` starts Vite only. Files under `frontend/api/` are **Vercel serverless functions** and do not run inside Vite. For local UI work, Vite proxies `/api/*` to your deployed Vercel app by default. To run the proxy on your machine (with your own `HF_TOKEN`), use the Vercel CLI from `frontend/`:
+
+```bash
+npx vercel dev
 ```
 
 The deployed Vercel API proxy reads private server-side environment variables:
