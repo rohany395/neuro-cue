@@ -1,15 +1,25 @@
-const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
+import { Client, handle_file } from "@gradio/client";
+
+const SPACE_URL =
+  import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
+
+let clientPromise = null;
+
+function getClient() {
+  if (!clientPromise) {
+    clientPromise = Client.connect(SPACE_URL).catch((error) => {
+      clientPromise = null;
+      throw error;
+    });
+  }
+
+  return clientPromise;
+}
 
 export async function checkHealth() {
   try {
-    const res = await fetch(PREDICT_PROXY_URL);
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.success) {
-      return {
-        status: data.hfToken?.valid ? "connected" : "error",
-        mock_mode: false,
-      };
-    }
+    const res = await fetch(SPACE_URL);
+    if (res.ok) return { status: "connected", mock_mode: false };
     return { status: "error" };
   } catch {
     return { status: "error" };
@@ -31,24 +41,28 @@ export async function predictStimulus({
   videoFile = null,
   nTimesteps = 10,
 }) {
-  const formData = new FormData();
-  formData.append("modality", modality);
-  formData.append("n_timesteps", String(nTimesteps));
+  const client = await getClient();
 
+  let payload;
   if (modality === "video" && videoFile) {
-    formData.append("video", videoFile);
+    payload = {
+      text: "",
+      n_timesteps: nTimesteps,
+      video: handle_file(videoFile),
+    };
   } else {
-    formData.append("text", text);
+    payload = {
+      text,
+      n_timesteps: nTimesteps,
+      video: null,
+    };
   }
 
-  const res = await fetch(PREDICT_PROXY_URL, {
-    method: "POST",
-    body: formData,
-  });
+  const result = await client.predict("/predict_json", payload);
 
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) {
-    throw new Error(data?.error || "Prediction failed");
+  const data = result.data?.[0];
+  if (!data) {
+    throw new Error("No data returned from inference");
   }
   if (data.success === false) {
     throw new Error(data.error || "Prediction failed");
