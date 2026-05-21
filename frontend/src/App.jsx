@@ -42,7 +42,7 @@ function App() {
       modality,
       text,
       videoFile,
-      nTimesteps: 100,
+      nTimesteps: 30,
     });
   };
 

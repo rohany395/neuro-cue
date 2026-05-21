@@ -56,6 +56,7 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TIMESTEPS = 30
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
 
@@ -110,6 +111,16 @@ def trim_video_if_needed(path: str, max_seconds: float = MAX_VIDEO_SECONDS) -> s
     except subprocess.CalledProcessError as e:
         print(f"🔴 re-encode failed: {e.stderr.decode('utf-8', 'replace')[:300]}")
         return path  # give up; downstream will handle or error
+
+
+def normalize_timestep_limit(value, max_timesteps: int = MAX_TIMESTEPS) -> int:
+    """Clamp public API visualization output to keep Plotly responses bounded."""
+    try:
+        n_timesteps = int(value)
+    except (TypeError, ValueError):
+        n_timesteps = 10
+    return max(1, min(n_timesteps, max_timesteps))
+
 
 def _load_model():
     """Load TRIBE v2 (only inside GPU function due to ZeroGPU)."""
@@ -489,7 +500,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(normalize_timestep_limit(n_timesteps), len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -597,7 +608,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(normalize_timestep_limit(n_timesteps), len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
@@ -754,7 +765,7 @@ with gr.Blocks() as demo:
                 )
 
             with gr.Accordion("Settings", open=False):
-                n_timesteps = gr.Slider(1, 30, value=10, step=1,
+                n_timesteps = gr.Slider(1, MAX_TIMESTEPS, value=10, step=1,
                                          label="Timesteps to visualize")
                 vmin_slider = gr.Slider(0.0, 1.0, value=0.3, step=0.05,
                          label="Activation threshold (fraction of peak)")
