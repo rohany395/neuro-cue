@@ -1,15 +1,30 @@
-const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
+import { Client, handle_file } from "@gradio/client";
+
+const SPACE_URL =
+  import.meta.env.VITE_SPACE_URL || "https://rohany395-neuro-cue.hf.space/";
+const MAX_TIMESTEPS = 30;
+
+let clientPromise = null;
+
+function getClient() {
+  if (!clientPromise) {
+    clientPromise = Client.connect(SPACE_URL);
+  }
+  return clientPromise;
+}
+
+function normalizeTimesteps(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return 10;
+  }
+  return Math.min(parsed, MAX_TIMESTEPS);
+}
 
 export async function checkHealth() {
   try {
-    const res = await fetch(PREDICT_PROXY_URL);
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.success) {
-      return {
-        status: data.hfToken?.valid ? "connected" : "error",
-        mock_mode: false,
-      };
-    }
+    const res = await fetch(SPACE_URL);
+    if (res.ok) return { status: "connected", mock_mode: false };
     return { status: "error" };
   } catch {
     return { status: "error" };
@@ -31,24 +46,29 @@ export async function predictStimulus({
   videoFile = null,
   nTimesteps = 10,
 }) {
-  const formData = new FormData();
-  formData.append("modality", modality);
-  formData.append("n_timesteps", String(nTimesteps));
+  const client = await getClient();
+  const safeTimesteps = normalizeTimesteps(nTimesteps);
 
+  let payload;
   if (modality === "video" && videoFile) {
-    formData.append("video", videoFile);
+    payload = {
+      text: "",
+      n_timesteps: safeTimesteps,
+      video: handle_file(videoFile),
+    };
   } else {
-    formData.append("text", text);
+    payload = {
+      text,
+      n_timesteps: safeTimesteps,
+      video: null,
+    };
   }
 
-  const res = await fetch(PREDICT_PROXY_URL, {
-    method: "POST",
-    body: formData,
-  });
+  const result = await client.predict("/predict_json", payload);
 
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) {
-    throw new Error(data?.error || "Prediction failed");
+  const data = result.data?.[0];
+  if (!data) {
+    throw new Error("No data returned from inference");
   }
   if (data.success === false) {
     throw new Error(data.error || "Prediction failed");
