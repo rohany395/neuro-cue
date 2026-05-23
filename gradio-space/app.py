@@ -56,8 +56,31 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TIMESTEPS = 30
+SUPPORTED_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".avi")
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+def normalize_timestep_limit(value, default: int = 10) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, MAX_TIMESTEPS))
+
+
+def ensure_video_extension(video_path: str, orig_name: str | None = None) -> str:
+    """TRIBE validates video inputs by extension; Gradio uploads may be blobs."""
+    if video_path.lower().endswith(SUPPORTED_VIDEO_EXTENSIONS):
+        return video_path
+
+    import shutil
+
+    suffix = Path(orig_name or "").suffix.lower()
+    ext = suffix if suffix in SUPPORTED_VIDEO_EXTENSIONS else ".mp4"
+    new_path = video_path + ext
+    shutil.copy(video_path, new_path)
+    return new_path
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -439,22 +462,11 @@ def predict_json(
             if not video_path:
                 return {"success": False, "error": f"Could not extract video path from: {video!r}"}
             
-            # TRIBE validates by extension. Gradio uploads strip the extension
-            # (saves as /tmp/gradio/.../blob), so we need to add one back.
-            # Try to detect from orig_name first, fall back to .mp4.
-            import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
-                new_path = video_path + ext
-                shutil.copy(video_path, new_path)
-                video_path = new_path
-                print(f"🔵 [predict_json] Renamed for extension: {video_path}")
+            orig_name = video.get("orig_name") if isinstance(video, dict) else None
+            normalized_video_path = ensure_video_extension(video_path, orig_name)
+            if normalized_video_path != video_path:
+                print(f"🔵 [predict_json] Renamed for extension: {normalized_video_path}")
+                video_path = normalized_video_path
             video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
@@ -489,7 +501,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(normalize_timestep_limit(n_timesteps), len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -565,6 +577,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        video_file = ensure_video_extension(video_file)
         video_file = trim_video_if_needed(video_file)
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
@@ -597,7 +610,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(normalize_timestep_limit(n_timesteps), len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
