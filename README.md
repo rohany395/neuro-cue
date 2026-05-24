@@ -43,10 +43,8 @@ flowchart TD
 
   subgraph Vercel["Vercel frontend"]
     React["React + Vite + Tailwind"]
-    Proxy["Serverless API proxy<br/>/api/predict"]
-    Client["@gradio/client<br/>server-side only"]
-    React --> Proxy
-    Proxy --> Client
+    Client["@gradio/client"]
+    React --> Client
   end
 
   subgraph Space["Hugging Face Space - ZeroGPU"]
@@ -107,8 +105,7 @@ Key project files:
 
 **Frontend (deployed):**
 - React 18 + Vite + TailwindCSS
-- Vercel serverless API proxy
-- @gradio/client (server-side authenticated Space access)
+- @gradio/client (programmatic Space API access)
 - Deployed on Vercel
 
 ## What I Built vs. What I Used
@@ -121,7 +118,7 @@ Key project files:
 **Built:**
 - Clinical ROI scoring layer (Destrieux atlas → 4 SLP-relevant regions)
 - Interactive 3D brain visualization with timestep slider
-- Custom React frontend with private server-side Hugging Face proxy
+- Custom React frontend with @gradio/client integration
 - Two-interface architecture (Gradio + React) calling shared inference backend
 - Deployment pipeline: ZeroGPU + Vercel + GitHub
 - Validation methodology (sensitivity, determinism, plausibility tests)
@@ -133,24 +130,10 @@ Key project files:
 ```bash
 cd frontend
 npm install
-cp .env.local.example .env.local   # then add HF_TOKEN for full local API
+# Optional: set VITE_SPACE_URL in .env.local to point at another public Space.
+# Do not put Hugging Face tokens in VITE_* variables; browser env values are public.
 npm run dev
 ```
-
-`npm run dev` starts Vite only. Files under `frontend/api/` are **Vercel serverless functions** and do not run inside Vite. For local UI work, Vite proxies `/api/*` to your deployed Vercel app by default. To run the proxy on your machine (with your own `HF_TOKEN`), use the Vercel CLI from `frontend/`:
-
-```bash
-npx vercel dev
-```
-
-The deployed Vercel API proxy reads private server-side environment variables:
-
-```bash
-HF_TOKEN=hf_...
-HF_SPACE_URL=https://rohany395-neuro-cue.hf.space/
-```
-
-Use `HF_TOKEN` without a `VITE_` prefix so it is never bundled into browser JavaScript.
 
 ### Gradio Space
 
