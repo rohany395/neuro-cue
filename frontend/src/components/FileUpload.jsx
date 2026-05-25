@@ -1,13 +1,21 @@
 import { useState, useRef } from "react";
+import { MAX_VIDEO_BYTES } from "../services/hfUpload.js";
 
 const ACCEPTED_EXTENSIONS = ".mp4,.mov,.webm";
+const MAX_VIDEO_MB = MAX_VIDEO_BYTES / (1024 * 1024);
 
 export default function FileUpload({ onFileSelected, currentFile, disabled }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [fileError, setFileError] = useState(null);
   const inputRef = useRef(null);
 
   function handleFile(file) {
     if (!file) return;
+    if (file.size > MAX_VIDEO_BYTES) {
+      setFileError(`File is too large. Maximum size is ${MAX_VIDEO_MB} MB.`);
+      return;
+    }
+    setFileError(null);
     onFileSelected(file);
   }
 
@@ -76,8 +84,11 @@ export default function FileUpload({ onFileSelected, currentFile, disabled }) {
             Drop a video file here
           </p>
           <p className="text-xs text-slate-500 mb-1">or click to browse</p>
-          <p className="text-xs text-slate-400">MP4, MOV, WebM</p>
+          <p className="text-xs text-slate-400">MP4, MOV, WebM · up to {MAX_VIDEO_MB} MB</p>
         </>
+      )}
+      {fileError && (
+        <p className="text-xs text-red-600 mt-2">{fileError}</p>
       )}
     </div>
   );
