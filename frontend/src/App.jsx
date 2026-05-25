@@ -17,7 +17,7 @@ function App() {
   const [text, setText] = useState(EXAMPLES[0]);
   const [videoFile, setVideoFile] = useState(null);
 
-  const { lastInput, isLoading, result, error, runPrediction, reset } =
+  const { lastInput, isLoading, phase, result, error, runPrediction, reset } =
     usePrediction();
 
   useEffect(() => {
@@ -42,7 +42,7 @@ function App() {
       modality,
       text,
       videoFile,
-      nTimesteps: 100,
+      nTimesteps: modality === "video" ? 15 : 10,
     });
   };
 
@@ -145,7 +145,12 @@ function App() {
           </div>
         )}
 
-        {isLoading && <LoadingState filename="your stimulus" />}
+        {isLoading && (
+          <LoadingState
+            filename={lastInput?.videoFile?.name || "your stimulus"}
+            phase={phase}
+          />
+        )}
 
         {error && !isLoading && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
