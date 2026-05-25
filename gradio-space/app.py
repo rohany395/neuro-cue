@@ -56,8 +56,16 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+# The Plotly brain payload contains one full frame per timestep; cap public/API
+# requests to keep responses inside Space and browser limits.
+MAX_TIMESTEPS = 30
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+
+def normalize_timestep_limit(value, available_timesteps: int) -> int:
+    requested = int(value)
+    return min(max(requested, 1), available_timesteps, MAX_TIMESTEPS)
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -489,7 +497,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = normalize_timestep_limit(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -597,7 +605,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = normalize_timestep_limit(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
