@@ -43,10 +43,8 @@ flowchart TD
 
   subgraph Vercel["Vercel frontend"]
     React["React + Vite + Tailwind"]
-    Proxy["Serverless API proxy<br/>/api/predict"]
-    Client["@gradio/client<br/>server-side only"]
-    React --> Proxy
-    Proxy --> Client
+    Client["@gradio/client"]
+    React --> Client
   end
 
   subgraph Space["Hugging Face Space - ZeroGPU"]
@@ -107,8 +105,7 @@ Key project files:
 
 **Frontend (deployed):**
 - React 18 + Vite + TailwindCSS
-- Vercel serverless API proxy
-- @gradio/client (server-side authenticated Space access)
+- @gradio/client (programmatic public Space API access)
 - Deployed on Vercel
 
 ## What I Built vs. What I Used
@@ -121,7 +118,7 @@ Key project files:
 **Built:**
 - Clinical ROI scoring layer (Destrieux atlas → 4 SLP-relevant regions)
 - Interactive 3D brain visualization with timestep slider
-- Custom React frontend with private server-side Hugging Face proxy
+- Custom React frontend with @gradio/client integration
 - Two-interface architecture (Gradio + React) calling shared inference backend
 - Deployment pipeline: ZeroGPU + Vercel + GitHub
 - Validation methodology (sensitivity, determinism, plausibility tests)
@@ -133,31 +130,13 @@ Key project files:
 ```bash
 cd frontend
 npm install
-cp .env.local.example .env.local   # then add HF_TOKEN for full local API
+cp .env.local.example .env.local   # optional public Space override
 npm run dev
 ```
 
-`npm run dev` starts Vite only. Files under `frontend/api/` are **Vercel serverless functions** and do not run inside Vite. For local UI work, Vite proxies `/api/*` to your deployed Vercel app by default. To run the proxy on your machine (with your own `HF_TOKEN`), use the Vercel CLI from `frontend/`:
-
-```bash
-npx vercel dev
-```
-
-The deployed Vercel API proxy reads environment variables:
-
-```bash
-# Server-only — never use VITE_ prefix
-HF_TOKEN=hf_...
-HF_SPACE_URL=https://rohany395-neuro-cue.hf.space/
-PREDICT_API_SECRET=<random secret, e.g. openssl rand -hex 32>
-
-# Baked into the production JS bundle at build time (same value as PREDICT_API_SECRET)
-VITE_PREDICT_API_KEY=<same as PREDICT_API_SECRET>
-```
-
-`HF_TOKEN` stays server-side only. `PREDICT_API_SECRET` blocks unauthenticated `curl`/scripts from driving GPU inference through your proxy; the matching `VITE_PREDICT_API_KEY` lets the public web app call `/api/predict`. Optional: `ALLOWED_ORIGINS` (comma-separated), `PREDICT_RATE_LIMIT_PER_MINUTE` (default 5), `PREDICT_RATE_LIMIT_PER_HOUR` (default 20).
-
-**Video uploads:** Vercel serverless functions reject request bodies over ~4.5 MB. The React app uploads video **directly to the Hugging Face Space** (`@gradio/client` + `VITE_SPACE_URL`), then POSTs a small JSON payload (`video_ref`) to `/api/predict`. Text predictions still use JSON only through the proxy.
+The React frontend calls the public Gradio Space directly from the browser for
+both text predictions and video uploads. Do not add Hugging Face tokens to Vite
+environment variables; `VITE_*` values are bundled into browser JavaScript.
 
 ### Gradio Space
 
