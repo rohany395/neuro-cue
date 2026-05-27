@@ -56,8 +56,30 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TEXT_CHARS = 5000
+MAX_TIMESTEPS = 30
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+def normalize_timestep_limit(value, available: int | None = None) -> int:
+    """Clamp public API requests so Plotly responses stay bounded."""
+    try:
+        requested = int(value)
+    except (TypeError, ValueError):
+        requested = 10
+
+    requested = max(1, requested)
+    requested = min(requested, MAX_TIMESTEPS)
+    if available is not None:
+        requested = min(requested, available)
+    return requested
+
+def validate_text_input(text: str) -> str:
+    raw = text if isinstance(text, str) else ("" if text is None else str(text))
+    cleaned = raw.strip()
+    if len(cleaned) > MAX_TEXT_CHARS:
+        raise ValueError(f"Text input must be {MAX_TEXT_CHARS} characters or fewer.")
+    return cleaned
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -410,7 +432,13 @@ def predict_json(
     """
     import traceback
     try:
-        print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
+        text_preview = text[:50] if isinstance(text, str) else repr(text)[:50]
+        print(f"🔵 [predict_json] Called with text={text_preview!r}, video={video!r}, n_timesteps={n_timesteps}")
+        requested_timesteps = normalize_timestep_limit(n_timesteps)
+        cleaned_text = validate_text_input(text) if text else ""
+        if video is None and not cleaned_text:
+            return {"success": False, "error": "Provide either text or video input."}
+
         model = _load_model()
         print("🔵 [predict_json] Model loaded")
 
@@ -458,10 +486,10 @@ def predict_json(
             video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
-        elif text and text.strip():
+        elif cleaned_text:
             print("🔵 [predict_json] Using text")
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-                tmp.write(text.strip())
+                tmp.write(cleaned_text)
                 fpath = tmp.name
             try:
                 df = model.get_events_dataframe(text_path=fpath)
@@ -489,7 +517,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = normalize_timestep_limit(requested_timesteps, available=len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -548,6 +576,8 @@ def predict_json(
         print(f"🟢 [predict_json] Returning {len(recommendations)} ROIs, {len(temporal_scores)} timesteps")
         return result
 
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     except Exception as e:
         tb = traceback.format_exc()
         print(f"🔴 [predict_json] EXCEPTION: {e}\n{tb}")
@@ -561,17 +591,24 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
-    model = _load_model()
+    requested_timesteps = normalize_timestep_limit(n_timesteps)
+    try:
+        cleaned_text = validate_text_input(text_input)
+    except ValueError as e:
+        raise gr.Error(str(e)) from e
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        model = _load_model()
         video_file = trim_video_if_needed(video_file)
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
+        model = _load_model()
         df = model.get_events_dataframe(audio_path=audio_file)
-    elif input_type == "Text" and text_input.strip():
+    elif input_type == "Text" and cleaned_text:
+        model = _load_model()
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-            tmp.write(text_input.strip())
+            tmp.write(cleaned_text)
             fpath = tmp.name
         try:
             df = model.get_events_dataframe(text_path=fpath)
@@ -597,7 +634,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = normalize_timestep_limit(requested_timesteps, available=len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
