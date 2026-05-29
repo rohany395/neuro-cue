@@ -1,5 +1,6 @@
 import { Client } from "@gradio/client";
 import { formidable } from "formidable";
+import { posix as pathPosix } from "node:path";
 import {
   applyCors,
   authorizePredictRequest,
@@ -16,8 +17,9 @@ const MAX_TEXT_CHARS = 5000;
 const MAX_JSON_BYTES = 64 * 1024;
 /** Vercel request body limit; reject multipart video uploads with a clear message. */
 const VERCEL_MAX_BODY_BYTES = 4.5 * 1024 * 1024;
-const MAX_TIMESTEPS = 100;
+const MAX_TIMESTEPS = 30;
 const TOKEN_CHECK_TIMEOUT_MS = 5000;
+const GRADIO_UPLOAD_PATH_PREFIX = "/tmp/gradio/";
 
 let clientPromise = null;
 let spaceHostname = null;
@@ -86,7 +88,59 @@ function singleFile(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function validateVideoRef(ref) {
+function validateGradioUploadPath(path) {
+  if (!path || typeof path !== "string") {
+    throw new Error("video_ref path is required.");
+  }
+  if (path.includes("\0")) {
+    throw new Error("video_ref path is invalid.");
+  }
+
+  const normalized = pathPosix.normalize(path);
+  if (
+    normalized !== path ||
+    !normalized.startsWith(GRADIO_UPLOAD_PATH_PREFIX) ||
+    normalized === GRADIO_UPLOAD_PATH_PREFIX.slice(0, -1)
+  ) {
+    throw new Error("video_ref path must reference a Hugging Face upload.");
+  }
+
+  return normalized;
+}
+
+function extractPathFromFileUrl(parsed) {
+  const filePrefix = "/file=";
+  if (parsed.pathname.startsWith(filePrefix)) {
+    return decodeURIComponent(parsed.pathname.slice(filePrefix.length));
+  }
+
+  const fileParam = parsed.searchParams.get("file");
+  return fileParam ? decodeURIComponent(fileParam) : "";
+}
+
+function validateVideoRefUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("video_ref url is invalid.");
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const allowedHost = getSpaceHostname();
+  if (host !== allowedHost) {
+    throw new Error("video_ref url must point to the configured Hugging Face Space.");
+  }
+
+  const pathFromUrl = extractPathFromFileUrl(parsed);
+  if (!pathFromUrl) {
+    throw new Error("video_ref url must reference an uploaded Hugging Face file.");
+  }
+
+  return validateGradioUploadPath(pathFromUrl);
+}
+
+export function validateVideoRef(ref) {
   if (!ref || typeof ref !== "object") {
     throw new Error("video_ref is required for video predictions.");
   }
@@ -98,19 +152,13 @@ function validateVideoRef(ref) {
     throw new Error("video_ref must include path or url.");
   }
 
+  let normalizedPath = path ? validateGradioUploadPath(path) : "";
   if (url) {
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error("video_ref url is invalid.");
+    const pathFromUrl = validateVideoRefUrl(url);
+    if (normalizedPath && normalizedPath !== pathFromUrl) {
+      throw new Error("video_ref path and url do not reference the same upload.");
     }
-
-    const host = parsed.hostname.toLowerCase();
-    const allowedHost = getSpaceHostname();
-    if (host !== allowedHost && !host.endsWith(".hf.space")) {
-      throw new Error("video_ref url must point to the configured Hugging Face Space.");
-    }
+    normalizedPath = normalizedPath || pathFromUrl;
   }
 
   const origName =
@@ -121,7 +169,7 @@ function validateVideoRef(ref) {
         : undefined;
 
   return {
-    path: path || undefined,
+    path: normalizedPath || undefined,
     url: url || undefined,
     orig_name: origName,
   };
