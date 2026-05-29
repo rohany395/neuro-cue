@@ -12,6 +12,7 @@ os.environ["VTK_DEFAULT_RENDER_WINDOW_OFFSCREEN"] = "true"
 
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 import matplotlib
@@ -56,8 +57,111 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_TIMESTEPS = 30
+GRADIO_UPLOAD_ROOT = Path(tempfile.gettempdir()) / "gradio"
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".avi")
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+
+def normalize_timestep_limit(value, available_count: int) -> int:
+    try:
+        requested = int(value)
+    except (TypeError, ValueError):
+        requested = 10
+
+    requested = max(1, min(requested, MAX_TIMESTEPS))
+    return min(requested, available_count)
+
+
+def _normalize_gradio_upload_path(path_value: str) -> str:
+    """Accept only files created by Gradio's upload endpoint."""
+    if not isinstance(path_value, str) or not path_value:
+        raise ValueError("Video upload reference is missing a path.")
+    if "\x00" in path_value:
+        raise ValueError("Video upload reference is invalid.")
+
+    path = Path(path_value)
+    if not path.is_absolute():
+        raise ValueError("Video upload reference must be an absolute upload path.")
+
+    upload_root = GRADIO_UPLOAD_ROOT.resolve(strict=False)
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError("Uploaded video file is no longer available.") from exc
+
+    try:
+        resolved.relative_to(upload_root)
+    except ValueError as exc:
+        raise ValueError("Video upload reference is outside the upload directory.") from exc
+
+    if not resolved.is_file():
+        raise ValueError("Video upload reference is not a file.")
+    if resolved.stat().st_size > MAX_VIDEO_BYTES:
+        raise ValueError("Uploaded video exceeds the maximum allowed size.")
+
+    return str(resolved)
+
+
+def _path_from_gradio_file_url(url_value: str | None) -> str | None:
+    if not isinstance(url_value, str) or not url_value:
+        return None
+
+    parsed = urlparse(url_value)
+    path_value = None
+    if parsed.path.startswith("/file="):
+        path_value = unquote(parsed.path[len("/file="):])
+    else:
+        path_value = parse_qs(parsed.query).get("file", [None])[0]
+
+    return path_value or None
+
+
+def _extract_video_upload(video) -> tuple[str, str | None]:
+    orig_name = None
+    url_path = None
+
+    if isinstance(video, dict):
+        raw_path = video.get("path")
+        url_path = _path_from_gradio_file_url(video.get("url"))
+        orig_name = video.get("orig_name")
+        print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
+    elif isinstance(video, str):
+        raw_path = video
+    elif hasattr(video, "name"):
+        raw_path = video.name
+    else:
+        raise ValueError(f"Unrecognized video input type: {type(video).__name__}")
+
+    if not raw_path and not url_path:
+        raise ValueError("Could not extract video path from upload reference.")
+
+    normalized_path = _normalize_gradio_upload_path(raw_path or url_path)
+    if raw_path and url_path:
+        normalized_url_path = _normalize_gradio_upload_path(url_path)
+        if normalized_path != normalized_url_path:
+            raise ValueError("Video upload path and URL do not reference the same file.")
+
+    return normalized_path, orig_name if isinstance(orig_name, str) else None
+
+
+def _ensure_video_extension(video_path: str, orig_name: str | None = None) -> str:
+    if video_path.lower().endswith(VIDEO_EXTENSIONS):
+        return video_path
+
+    if orig_name and orig_name.lower().endswith(VIDEO_EXTENSIONS):
+        ext = "." + orig_name.rsplit(".", 1)[-1].lower()
+    else:
+        # Gradio browser uploads commonly arrive as extensionless "blob" files.
+        ext = ".mp4"
+
+    new_path = video_path + ext
+    import shutil
+    shutil.copy(video_path, new_path)
+    print(f"🔵 [predict_json] Renamed for extension: {new_path}")
+    return new_path
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -418,43 +522,13 @@ def predict_json(
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
-            if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
-                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
+            video_path, orig_name = _extract_video_upload(video)
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
-            import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
-                new_path = video_path + ext
-                shutil.copy(video_path, new_path)
-                video_path = new_path
-                print(f"🔵 [predict_json] Renamed for extension: {video_path}")
+            video_path = _ensure_video_extension(video_path, orig_name)
             video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
@@ -489,7 +563,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = normalize_timestep_limit(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -597,7 +671,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = normalize_timestep_limit(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
