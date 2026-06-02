@@ -1,5 +1,6 @@
 import { Client } from "@gradio/client";
 import { formidable } from "formidable";
+import path from "node:path";
 import {
   applyCors,
   authorizePredictRequest,
@@ -18,6 +19,7 @@ const MAX_JSON_BYTES = 64 * 1024;
 const VERCEL_MAX_BODY_BYTES = 4.5 * 1024 * 1024;
 const MAX_TIMESTEPS = 100;
 const TOKEN_CHECK_TIMEOUT_MS = 5000;
+const GRADIO_UPLOAD_ROOT = "/tmp/gradio";
 
 let clientPromise = null;
 let spaceHostname = null;
@@ -86,7 +88,72 @@ function singleFile(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function validateVideoRef(ref) {
+function looksLikeUrl(value) {
+  return /^[a-z][a-z\d+\-.]*:/i.test(value);
+}
+
+function normalizeUploadedPath(rawPath) {
+  if (!rawPath) {
+    throw new Error("video_ref must include path.");
+  }
+
+  if (looksLikeUrl(rawPath)) {
+    throw new Error("video_ref path must be a local Gradio upload path.");
+  }
+
+  if (!path.posix.isAbsolute(rawPath)) {
+    throw new Error("video_ref path must be absolute.");
+  }
+
+  const normalized = path.posix.normalize(rawPath);
+  if (
+    normalized === GRADIO_UPLOAD_ROOT ||
+    !normalized.startsWith(`${GRADIO_UPLOAD_ROOT}/`)
+  ) {
+    throw new Error("video_ref path must point to a Gradio upload.");
+  }
+
+  return normalized;
+}
+
+function extractUploadPathFromUrl(parsed) {
+  const pathname = decodeURIComponent(parsed.pathname);
+  const marker = "/file=";
+  const markerIndex = pathname.indexOf(marker);
+  if (markerIndex === -1) {
+    return null;
+  }
+
+  return pathname.slice(markerIndex + marker.length);
+}
+
+function validateVideoUrl(rawUrl, uploadedPath) {
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("video_ref url is invalid.");
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const allowedHost = getSpaceHostname();
+  if (host !== allowedHost) {
+    throw new Error("video_ref url must point to the configured Hugging Face Space.");
+  }
+
+  const urlPath = extractUploadPathFromUrl(parsed);
+  if (urlPath && normalizeUploadedPath(urlPath) !== uploadedPath) {
+    throw new Error("video_ref url does not match the uploaded file path.");
+  }
+
+  return rawUrl;
+}
+
+export function validateVideoRef(ref) {
   if (!ref || typeof ref !== "object") {
     throw new Error("video_ref is required for video predictions.");
   }
@@ -94,24 +161,8 @@ function validateVideoRef(ref) {
   const path = typeof ref.path === "string" ? ref.path : "";
   const url = typeof ref.url === "string" ? ref.url : "";
 
-  if (!path && !url) {
-    throw new Error("video_ref must include path or url.");
-  }
-
-  if (url) {
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error("video_ref url is invalid.");
-    }
-
-    const host = parsed.hostname.toLowerCase();
-    const allowedHost = getSpaceHostname();
-    if (host !== allowedHost && !host.endsWith(".hf.space")) {
-      throw new Error("video_ref url must point to the configured Hugging Face Space.");
-    }
-  }
+  const uploadedPath = normalizeUploadedPath(path);
+  const validatedUrl = validateVideoUrl(url, uploadedPath);
 
   const origName =
     typeof ref.orig_name === "string"
@@ -121,8 +172,8 @@ function validateVideoRef(ref) {
         : undefined;
 
   return {
-    path: path || undefined,
-    url: url || undefined,
+    path: uploadedPath,
+    url: validatedUrl,
     orig_name: origName,
   };
 }
