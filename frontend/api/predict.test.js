@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateVideoRef } from "./predict.js";
+import { parseTimesteps, validateVideoRef } from "./predict.js";
 
 const SPACE_URL = "https://rohany395-neuro-cue.hf.space";
 
@@ -45,4 +45,13 @@ test("validateVideoRef rejects mismatched path and URL references", () => {
       }),
     /do not reference the same upload/,
   );
+});
+
+test("parseTimesteps caps public API requests to the Space UI limit", () => {
+  assert.equal(parseTimesteps(10), 10);
+  assert.equal(parseTimesteps(100), 30);
+});
+
+test("parseTimesteps rejects non-positive values", () => {
+  assert.throws(() => parseTimesteps(0), /positive integer/);
 });

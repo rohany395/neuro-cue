@@ -17,7 +17,7 @@ const MAX_TEXT_CHARS = 5000;
 const MAX_JSON_BYTES = 64 * 1024;
 /** Vercel request body limit; reject multipart video uploads with a clear message. */
 const VERCEL_MAX_BODY_BYTES = 4.5 * 1024 * 1024;
-const MAX_TIMESTEPS = 100;
+const MAX_TIMESTEPS = 30;
 const TOKEN_CHECK_TIMEOUT_MS = 5000;
 const GRADIO_UPLOAD_ROOT = "/tmp/gradio";
 
@@ -252,7 +252,7 @@ async function parseRequest(req) {
   throw new Error("Request must be application/json or multipart/form-data (text only).");
 }
 
-function parseTimesteps(value) {
+export function parseTimesteps(value) {
   const nTimesteps = Number.parseInt(value, 10);
 
   if (!Number.isInteger(nTimesteps) || nTimesteps < 1) {

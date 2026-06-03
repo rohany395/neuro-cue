@@ -58,8 +58,16 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TIMESTEPS = 30
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+def normalize_timestep_limit(value) -> int:
+    n_timesteps = int(value)
+    if n_timesteps < 1:
+        raise ValueError("n_timesteps must be a positive integer.")
+    return min(n_timesteps, MAX_TIMESTEPS)
+
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -413,6 +421,10 @@ def predict_json(
     import traceback
     try:
         print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
+        try:
+            n_timesteps = normalize_timestep_limit(n_timesteps)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
 
         # Build events dataframe based on input type
         if video is not None:
@@ -481,7 +493,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -553,6 +565,7 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
+    n_timesteps = normalize_timestep_limit(n_timesteps)
     model = _load_model()
 
     # Build events dataframe based on input modality
@@ -589,7 +602,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
