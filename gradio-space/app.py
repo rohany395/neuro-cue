@@ -21,6 +21,8 @@ import gradio as gr
 import spaces
 import subprocess
 
+from video_validation import VIDEO_EXTENSIONS, validate_video_reference
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -411,41 +413,27 @@ def predict_json(
     import traceback
     try:
         print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
-        model = _load_model()
-        print("🔵 [predict_json] Model loaded")
 
         # Build events dataframe based on input type
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
+
+            try:
+                video_path, orig_name = validate_video_reference(video)
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+
             if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
                 print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
             import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
+            if not any(video_path.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                if orig_name and any(orig_name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
                     ext = "." + orig_name.rsplit(".", 1)[-1].lower()
                 else:
                     # Default to .mp4 — most common case for browser uploads
@@ -456,6 +444,8 @@ def predict_json(
                 video_path = new_path
                 print(f"🔵 [predict_json] Renamed for extension: {video_path}")
             video_path = trim_video_if_needed(video_path)
+            model = _load_model()
+            print("🔵 [predict_json] Model loaded")
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
         elif text and text.strip():
@@ -464,6 +454,8 @@ def predict_json(
                 tmp.write(text.strip())
                 fpath = tmp.name
             try:
+                model = _load_model()
+                print("🔵 [predict_json] Model loaded")
                 df = model.get_events_dataframe(text_path=fpath)
             finally:
                 os.unlink(fpath)
