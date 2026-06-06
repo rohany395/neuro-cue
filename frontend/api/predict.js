@@ -1,5 +1,6 @@
 import { Client } from "@gradio/client";
 import { formidable } from "formidable";
+import path from "node:path";
 import {
   applyCors,
   authorizePredictRequest,
@@ -16,7 +17,8 @@ const MAX_TEXT_CHARS = 5000;
 const MAX_JSON_BYTES = 64 * 1024;
 /** Vercel request body limit; reject multipart video uploads with a clear message. */
 const VERCEL_MAX_BODY_BYTES = 4.5 * 1024 * 1024;
-const MAX_TIMESTEPS = 100;
+const MAX_TIMESTEPS = 30;
+const GRADIO_UPLOAD_PREFIX = "/tmp/gradio/";
 const TOKEN_CHECK_TIMEOUT_MS = 5000;
 
 let clientPromise = null;
@@ -39,7 +41,10 @@ function getClient() {
   }
 
   if (!clientPromise) {
-    clientPromise = Client.connect(SPACE_URL, { token: HF_TOKEN });
+    clientPromise = Client.connect(SPACE_URL, { token: HF_TOKEN }).catch((error) => {
+      clientPromise = null;
+      throw error;
+    });
   }
   return clientPromise;
 }
@@ -86,16 +91,35 @@ function singleFile(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function validateVideoRef(ref) {
+function normalizeUploadedPath(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (value.includes("\0") || value.includes("://")) {
+    throw new Error("video_ref path must be a local Gradio upload path.");
+  }
+
+  const normalized = path.posix.normalize(value);
+  if (normalized !== value || !normalized.startsWith(GRADIO_UPLOAD_PREFIX)) {
+    throw new Error("video_ref path must be a local Gradio upload path.");
+  }
+
+  return value;
+}
+
+export function validateVideoRef(ref) {
   if (!ref || typeof ref !== "object") {
     throw new Error("video_ref is required for video predictions.");
   }
 
-  const path = typeof ref.path === "string" ? ref.path : "";
+  const uploadedPath = normalizeUploadedPath(
+    typeof ref.path === "string" ? ref.path : "",
+  );
   const url = typeof ref.url === "string" ? ref.url : "";
 
-  if (!path && !url) {
-    throw new Error("video_ref must include path or url.");
+  if (!uploadedPath) {
+    throw new Error("video_ref must include a local Gradio upload path.");
   }
 
   if (url) {
@@ -108,7 +132,7 @@ function validateVideoRef(ref) {
 
     const host = parsed.hostname.toLowerCase();
     const allowedHost = getSpaceHostname();
-    if (host !== allowedHost && !host.endsWith(".hf.space")) {
+    if (!["http:", "https:"].includes(parsed.protocol) || host !== allowedHost) {
       throw new Error("video_ref url must point to the configured Hugging Face Space.");
     }
   }
@@ -121,7 +145,7 @@ function validateVideoRef(ref) {
         : undefined;
 
   return {
-    path: path || undefined,
+    path: uploadedPath,
     url: url || undefined,
     orig_name: origName,
   };
@@ -164,7 +188,42 @@ function parseMultipart(req) {
   });
 }
 
-function readJson(req) {
+export function normalizePredictJson(json) {
+  if (!json || typeof json !== "object" || Array.isArray(json)) {
+    throw new Error("Request body must be a JSON object.");
+  }
+
+  return {
+    modality: json.modality || "text",
+    text: json.text || "",
+    nTimesteps: json.n_timesteps ?? json.nTimesteps ?? 10,
+    videoRef: json.video_ref ?? json.videoRef ?? null,
+  };
+}
+
+function parseJsonPayload(body) {
+  if (Buffer.isBuffer(body)) {
+    body = body.toString("utf8");
+  }
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw new Error("Request body must be valid JSON.");
+    }
+  }
+  return body;
+}
+
+export function readJson(req) {
+  if (req.body !== undefined) {
+    try {
+      return Promise.resolve(normalizePredictJson(parseJsonPayload(req.body)));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     let body = "";
 
@@ -178,13 +237,7 @@ function readJson(req) {
 
     req.on("end", () => {
       try {
-        const json = body ? JSON.parse(body) : {};
-        resolve({
-          modality: json.modality || "text",
-          text: json.text || "",
-          nTimesteps: json.n_timesteps ?? json.nTimesteps ?? 10,
-          videoRef: json.video_ref ?? json.videoRef ?? null,
-        });
+        resolve(normalizePredictJson(parseJsonPayload(body || "{}")));
       } catch {
         reject(new Error("Request body must be valid JSON."));
       }
@@ -208,7 +261,7 @@ async function parseRequest(req) {
   throw new Error("Request must be application/json or multipart/form-data (text only).");
 }
 
-function parseTimesteps(value) {
+export function parseTimesteps(value) {
   const nTimesteps = Number.parseInt(value, 10);
 
   if (!Number.isInteger(nTimesteps) || nTimesteps < 1) {
