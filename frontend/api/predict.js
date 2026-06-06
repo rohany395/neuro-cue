@@ -215,7 +215,7 @@ function parseJsonPayload(body) {
   return body;
 }
 
-function readJson(req) {
+export function readJson(req) {
   if (req.body !== undefined) {
     try {
       return Promise.resolve(normalizePredictJson(parseJsonPayload(req.body)));

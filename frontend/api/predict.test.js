@@ -4,10 +4,37 @@ import test from "node:test";
 import {
   normalizePredictJson,
   parseTimesteps,
+  readJson,
   validateVideoRef,
 } from "./predict.js";
 
-test("normalizes Vercel-parsed JSON request bodies", () => {
+test("reads Vercel-parsed JSON request bodies", async () => {
+  assert.deepEqual(
+    await readJson({
+      body: {
+        modality: "video",
+        n_timesteps: 15,
+        video_ref: {
+          path: "/tmp/gradio/session/blob",
+          url: "https://rohany395-neuro-cue.hf.space/gradio_api/file=/tmp/gradio/session/blob",
+          orig_name: "clip.mp4",
+        },
+      },
+    }),
+    {
+      modality: "video",
+      text: "",
+      nTimesteps: 15,
+      videoRef: {
+        path: "/tmp/gradio/session/blob",
+        url: "https://rohany395-neuro-cue.hf.space/gradio_api/file=/tmp/gradio/session/blob",
+        orig_name: "clip.mp4",
+      },
+    },
+  );
+});
+
+test("normalizes predict JSON fields", () => {
   assert.deepEqual(
     normalizePredictJson({
       modality: "video",
