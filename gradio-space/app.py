@@ -20,6 +20,11 @@ matplotlib.use("Agg")
 import gradio as gr
 import spaces
 import subprocess
+from input_validation import (
+    VIDEO_EXTENSIONS,
+    normalize_timestep_limit,
+    resolve_uploaded_video_path,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
@@ -75,7 +80,7 @@ def _probe_duration(path: str) -> float | None:
 
 def trim_video_if_needed(path: str, max_seconds: float = MAX_VIDEO_SECONDS) -> str:
     """If longer than max_seconds, trim and return new path. Otherwise return path unchanged.
-    Falls back to original path on any ffmpeg failure."""
+    Raises if trimming a long video fails rather than processing the full upload."""
     dur = _probe_duration(path)
     if dur is None or dur <= max_seconds:
         if dur is not None:
@@ -96,8 +101,11 @@ def trim_video_if_needed(path: str, max_seconds: float = MAX_VIDEO_SECONDS) -> s
             capture_output=True, check=True, timeout=30,
         )
         return out_path
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️  stream copy failed: {e.stderr.decode('utf-8', 'replace')[:300]}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        stderr = getattr(e, "stderr", b"") or b""
+        if isinstance(stderr, str):
+            stderr = stderr.encode("utf-8", "replace")
+        print(f"⚠️  stream copy failed: {stderr.decode('utf-8', 'replace')[:300]}")
 
     try:
         subprocess.run(
@@ -107,9 +115,12 @@ def trim_video_if_needed(path: str, max_seconds: float = MAX_VIDEO_SECONDS) -> s
             capture_output=True, check=True, timeout=120,
         )
         return out_path
-    except subprocess.CalledProcessError as e:
-        print(f"🔴 re-encode failed: {e.stderr.decode('utf-8', 'replace')[:300]}")
-        return path  # give up; downstream will handle or error
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        stderr = getattr(e, "stderr", b"") or b""
+        if isinstance(stderr, str):
+            stderr = stderr.encode("utf-8", "replace")
+        print(f"🔴 re-encode failed: {stderr.decode('utf-8', 'replace')[:300]}")
+        raise RuntimeError("Video exceeds 15 seconds and could not be trimmed safely.") from e
 
 def _load_model():
     """Load TRIBE v2 (only inside GPU function due to ZeroGPU)."""
@@ -410,6 +421,11 @@ def predict_json(
     """
     import traceback
     try:
+        try:
+            n_limit = normalize_timestep_limit(n_timesteps)
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
         print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
         model = _load_model()
         print("🔵 [predict_json] Model loaded")
@@ -418,34 +434,23 @@ def predict_json(
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
+
+            try:
+                video_path = resolve_uploaded_video_path(video)
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
             if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
                 print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
             import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
+            if not video_path.lower().endswith(VIDEO_EXTENSIONS):
                 orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
+                if orig_name and orig_name.lower().endswith(VIDEO_EXTENSIONS):
                     ext = "." + orig_name.rsplit(".", 1)[-1].lower()
                 else:
                     # Default to .mp4 — most common case for browser uploads
@@ -489,7 +494,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(n_limit, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -561,6 +566,11 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
+    try:
+        n_limit = normalize_timestep_limit(n_timesteps)
+    except ValueError as e:
+        raise gr.Error(str(e)) from e
+
     model = _load_model()
 
     # Build events dataframe based on input modality
@@ -597,7 +607,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_limit, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 

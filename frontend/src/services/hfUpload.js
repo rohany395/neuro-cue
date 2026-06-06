@@ -9,7 +9,10 @@ let clientPromise = null;
 
 async function getSpaceClient() {
   if (!clientPromise) {
-    clientPromise = Client.connect(SPACE_URL);
+    clientPromise = Client.connect(SPACE_URL).catch((error) => {
+      clientPromise = null;
+      throw error;
+    });
   }
   return clientPromise;
 }
