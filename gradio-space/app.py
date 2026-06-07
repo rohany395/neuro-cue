@@ -21,6 +21,13 @@ import gradio as gr
 import spaces
 import subprocess
 
+from input_validation import (
+    extension_from_name,
+    has_video_extension,
+    normalize_timestep_limit,
+    resolve_uploaded_video_path,
+)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -418,39 +425,20 @@ def predict_json(
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
-            if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
-                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
+
+            try:
+                video_path, orig_name = resolve_uploaded_video_path(video)
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
+
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
             import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
+            if not has_video_extension(video_path):
+                ext = extension_from_name(orig_name)
                 new_path = video_path + ext
                 shutil.copy(video_path, new_path)
                 video_path = new_path
@@ -489,7 +477,12 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        try:
+            requested_timesteps = normalize_timestep_limit(n_timesteps)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+
+        n = min(requested_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -597,7 +590,12 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    try:
+        requested_timesteps = normalize_timestep_limit(n_timesteps)
+    except ValueError as exc:
+        raise gr.Error(str(exc)) from exc
+
+    n = min(requested_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 

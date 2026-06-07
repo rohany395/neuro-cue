@@ -1,51 +1,50 @@
-import { uploadVideoToSpace } from "./hfUpload.js";
+import { getSpaceClient, uploadVideoToSpace } from "./hfUpload.js";
 
-const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
-const PREDICT_API_KEY = import.meta.env.VITE_PREDICT_API_KEY || "";
+const MAX_TEXT_CHARS = 5000;
+const MAX_TIMESTEPS = 30;
 
-function predictHeaders(contentType = null) {
-  const headers = {};
-  if (contentType) {
-    headers["Content-Type"] = contentType;
+function normalizeTimesteps(value) {
+  const nTimesteps = Number.parseInt(value, 10);
+  if (!Number.isInteger(nTimesteps) || nTimesteps < 1) {
+    throw new Error("n_timesteps must be a positive integer.");
   }
-  if (PREDICT_API_KEY) {
-    headers["x-neuro-cue-api-key"] = PREDICT_API_KEY;
-  }
-  return headers;
+  return Math.min(nTimesteps, MAX_TIMESTEPS);
 }
 
-async function parsePredictResponse(res) {
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) {
-    if (res.status === 401 && !PREDICT_API_KEY) {
-      throw new Error(
-        "Missing VITE_PREDICT_API_KEY. Copy .env.local.example and set the same value as PREDICT_API_SECRET.",
-      );
-    }
-    if (res.status === 413) {
-      throw new Error(
-        "Request too large for the API proxy. Video uploads should go directly to Hugging Face — refresh and try again.",
-      );
-    }
-    throw new Error(data?.error || "Prediction failed");
+function normalizeText(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("Text input is required.");
   }
+  if (trimmed.length > MAX_TEXT_CHARS) {
+    throw new Error(`Text input must be ${MAX_TEXT_CHARS} characters or fewer.`);
+  }
+  return trimmed;
+}
+
+async function predictOnSpace(payload) {
+  const client = await getSpaceClient();
+  const result = await client.predict("/predict_json", payload);
+  const data = result.data?.[0];
+
+  if (!data) {
+    throw new Error("No prediction data returned from Hugging Face.");
+  }
+
   if (data.success === false) {
     throw new Error(data.error || "Prediction failed");
   }
+
   return data;
 }
 
 export async function checkHealth() {
   try {
-    const res = await fetch(PREDICT_PROXY_URL);
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.success) {
-      return {
-        status: data.hfToken?.valid ? "connected" : "error",
-        mock_mode: false,
-      };
-    }
-    return { status: "error" };
+    await getSpaceClient();
+    return {
+      status: "connected",
+      mock_mode: false,
+    };
   } catch {
     return { status: "error" };
   }
@@ -70,34 +69,24 @@ export async function predictStimulus({
   nTimesteps = 10,
   onPhase = null,
 }) {
+  const safeTimesteps = normalizeTimesteps(nTimesteps);
+
   if (modality === "video" && videoFile) {
     onPhase?.("uploading");
     const videoRef = await uploadVideoToSpace(videoFile);
 
     onPhase?.("predicting");
-    const res = await fetch(PREDICT_PROXY_URL, {
-      method: "POST",
-      headers: predictHeaders("application/json"),
-      body: JSON.stringify({
-        modality: "video",
-        n_timesteps: nTimesteps,
-        video_ref: videoRef,
-      }),
+    return predictOnSpace({
+      text: "",
+      n_timesteps: safeTimesteps,
+      video: videoRef,
     });
-
-    return parsePredictResponse(res);
   }
 
   onPhase?.("predicting");
-  const res = await fetch(PREDICT_PROXY_URL, {
-    method: "POST",
-    headers: predictHeaders("application/json"),
-    body: JSON.stringify({
-      modality: "text",
-      text,
-      n_timesteps: nTimesteps,
-    }),
+  return predictOnSpace({
+    text: normalizeText(text),
+    n_timesteps: safeTimesteps,
+    video: null,
   });
-
-  return parsePredictResponse(res);
 }
