@@ -58,6 +58,7 @@ _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
 MAX_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_TIMESTEPS = 30
 GRADIO_UPLOAD_ROOT = Path("/tmp/gradio").resolve()
 GRADIO_FILE_PREFIX = "/file="
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".avi")
@@ -167,6 +168,18 @@ def resolve_uploaded_video_path(video) -> str:
         return _validate_uploaded_video_path(video.name)
 
     raise ValueError(f"Unrecognized video input type: {type(video).__name__}")
+
+
+def normalize_timestep_limit(value) -> int:
+    try:
+        n_timesteps = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_timesteps must be a positive integer.") from exc
+
+    if n_timesteps < 1:
+        raise ValueError("n_timesteps must be a positive integer.")
+
+    return min(n_timesteps, MAX_TIMESTEPS)
 
 def _load_model():
     """Load TRIBE v2 (only inside GPU function due to ZeroGPU)."""
@@ -534,7 +547,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(normalize_timestep_limit(n_timesteps), len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -642,7 +655,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(normalize_timestep_limit(n_timesteps), len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
