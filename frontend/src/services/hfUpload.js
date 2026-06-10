@@ -38,7 +38,7 @@ export async function uploadVideoToSpace(file) {
   const uploaded = await client.upload(prepared, root, undefined, MAX_VIDEO_BYTES);
   const fileData = uploaded?.[0];
 
-  if (!fileData?.path && !fileData?.url) {
+  if (!fileData?.url) {
     throw new Error("Upload to Hugging Face Space did not return a file reference.");
   }
 

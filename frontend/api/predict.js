@@ -1,5 +1,7 @@
 import { Client } from "@gradio/client";
 import { formidable } from "formidable";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   applyCors,
   authorizePredictRequest,
@@ -16,21 +18,20 @@ const MAX_TEXT_CHARS = 5000;
 const MAX_JSON_BYTES = 64 * 1024;
 /** Vercel request body limit; reject multipart video uploads with a clear message. */
 const VERCEL_MAX_BODY_BYTES = 4.5 * 1024 * 1024;
-const MAX_TIMESTEPS = 100;
+const MAX_TIMESTEPS = 30;
 const TOKEN_CHECK_TIMEOUT_MS = 5000;
+const GRADIO_FILE_PREFIX = "/file=";
+const GRADIO_UPLOAD_ROOT = "/tmp/gradio";
 
 let clientPromise = null;
-let spaceHostname = null;
 
 export const config = {
   maxDuration: 300,
 };
 
-function getSpaceHostname() {
-  if (!spaceHostname) {
-    spaceHostname = new URL(SPACE_URL).hostname.toLowerCase();
-  }
-  return spaceHostname;
+function getSpaceOrigin() {
+  const parsed = new URL(SPACE_URL);
+  return parsed.origin.toLowerCase();
 }
 
 function getClient() {
@@ -86,7 +87,42 @@ function singleFile(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function validateVideoRef(ref) {
+function normalizeUploadedPath(filePath) {
+  if (typeof filePath !== "string" || !filePath || filePath.includes("\0")) {
+    throw new Error("video_ref file path is invalid.");
+  }
+
+  const normalized = path.posix.normalize(filePath);
+  if (!normalized.startsWith(`${GRADIO_UPLOAD_ROOT}/`)) {
+    throw new Error("video_ref must point to an uploaded Gradio file.");
+  }
+  return normalized;
+}
+
+function extractUploadedPathFromUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("video_ref url is invalid.");
+  }
+
+  if (parsed.origin.toLowerCase() !== getSpaceOrigin()) {
+    throw new Error("video_ref url must point to the configured Hugging Face Space.");
+  }
+
+  if (!parsed.pathname.startsWith(GRADIO_FILE_PREFIX) || parsed.search || parsed.hash) {
+    throw new Error("video_ref url must be a Gradio uploaded file URL.");
+  }
+
+  const uploadedPath = decodeURIComponent(parsed.pathname.slice(GRADIO_FILE_PREFIX.length));
+  return {
+    path: normalizeUploadedPath(uploadedPath),
+    url: parsed.toString(),
+  };
+}
+
+export function validateVideoRef(ref) {
   if (!ref || typeof ref !== "object") {
     throw new Error("video_ref is required for video predictions.");
   }
@@ -94,23 +130,13 @@ function validateVideoRef(ref) {
   const path = typeof ref.path === "string" ? ref.path : "";
   const url = typeof ref.url === "string" ? ref.url : "";
 
-  if (!path && !url) {
-    throw new Error("video_ref must include path or url.");
+  if (!url) {
+    throw new Error("video_ref must include a Gradio uploaded file URL.");
   }
 
-  if (url) {
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error("video_ref url is invalid.");
-    }
-
-    const host = parsed.hostname.toLowerCase();
-    const allowedHost = getSpaceHostname();
-    if (host !== allowedHost && !host.endsWith(".hf.space")) {
-      throw new Error("video_ref url must point to the configured Hugging Face Space.");
-    }
+  const uploaded = extractUploadedPathFromUrl(url);
+  if (path && normalizeUploadedPath(path) !== uploaded.path) {
+    throw new Error("video_ref path does not match the uploaded file URL.");
   }
 
   const origName =
@@ -121,10 +147,16 @@ function validateVideoRef(ref) {
         : undefined;
 
   return {
-    path: path || undefined,
-    url: url || undefined,
+    path: uploaded.path,
+    url: uploaded.url,
     orig_name: origName,
   };
+}
+
+async function cleanupUpload(videoFile) {
+  if (videoFile?.filepath) {
+    await fs.unlink(videoFile.filepath).catch(() => {});
+  }
 }
 
 function parseMultipart(req) {
@@ -137,7 +169,7 @@ function parseMultipart(req) {
   });
 
   return new Promise((resolve, reject) => {
-    form.parse(req, (error, fields, files) => {
+    form.parse(req, async (error, fields, files) => {
       if (error) {
         reject(error);
         return;
@@ -145,6 +177,7 @@ function parseMultipart(req) {
 
       const videoFile = singleFile(files.video);
       if (videoFile?.filepath) {
+        await cleanupUpload(videoFile);
         reject(
           new Error(
             "Do not upload video files through this API (Vercel 4.5MB limit). " +
@@ -208,7 +241,7 @@ async function parseRequest(req) {
   throw new Error("Request must be application/json or multipart/form-data (text only).");
 }
 
-function parseTimesteps(value) {
+export function parseTimesteps(value) {
   const nTimesteps = Number.parseInt(value, 10);
 
   if (!Number.isInteger(nTimesteps) || nTimesteps < 1) {
