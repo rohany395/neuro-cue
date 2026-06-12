@@ -56,8 +56,84 @@ _roi_masks = None
 _mesh_cache = None
 
 MAX_VIDEO_SECONDS = 15.0
+MAX_TIMESTEPS = 30
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".avi")
+GRADIO_UPLOAD_ROOT = Path(os.environ.get("GRADIO_TEMP_DIR", "/tmp/gradio")).resolve()
+PUBLIC_SPACE_URL = os.environ.get(
+    "SPACE_URL",
+    os.environ.get("HF_SPACE_URL", "https://rohany395-neuro-cue.hf.space/"),
+)
 # Keep public @gradio/client calls within ZeroGPU's current per-request limit.
 ZERO_GPU_DURATION_SECONDS = 120
+
+def normalize_timestep_limit(value, default: int = 10) -> int:
+    if value is None:
+        n_timesteps = default
+    else:
+        n_timesteps = int(value)
+
+    if n_timesteps < 1:
+        raise ValueError("n_timesteps must be a positive integer.")
+
+    return min(n_timesteps, MAX_TIMESTEPS)
+
+
+def _configured_space_hostname() -> str:
+    from urllib.parse import urlparse
+
+    return (urlparse(PUBLIC_SPACE_URL).hostname or "").lower()
+
+
+def _path_from_space_file_url(url: str) -> str:
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(url)
+    allowed_host = _configured_space_hostname()
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or host != allowed_host:
+        raise ValueError("Video URL must point to the configured Hugging Face Space.")
+
+    prefix = "/file="
+    if not parsed.path.startswith(prefix):
+        raise ValueError("Video URL must reference a Gradio uploaded file.")
+
+    return unquote(parsed.path[len(prefix):])
+
+
+def _validate_gradio_upload_path(path: str) -> str:
+    resolved = Path(path).resolve(strict=True)
+    if resolved != GRADIO_UPLOAD_ROOT and GRADIO_UPLOAD_ROOT not in resolved.parents:
+        raise ValueError("Video path must reference a Gradio upload.")
+    if not resolved.is_file():
+        raise ValueError("Video path must reference a file.")
+    return str(resolved)
+
+
+def resolve_uploaded_video_path(video) -> tuple[str, str | None]:
+    """Return a validated local Gradio upload path and optional original filename."""
+    orig_name = None
+
+    if isinstance(video, dict):
+        path = video.get("path")
+        url = video.get("url")
+        orig_name = video.get("orig_name")
+
+        if url:
+            url_path = _path_from_space_file_url(url)
+            if path and Path(path).resolve(strict=False) != Path(url_path).resolve(strict=False):
+                raise ValueError("Video path and URL refer to different files.")
+            path = path or url_path
+    elif isinstance(video, str):
+        path = video
+    elif hasattr(video, "name"):
+        path = video.name
+    else:
+        raise ValueError(f"Unrecognized video input type: {type(video).__name__}")
+
+    if not path:
+        raise ValueError("Could not extract video path.")
+
+    return _validate_gradio_upload_path(path), orig_name
 
 def _probe_duration(path: str) -> float | None:
     try:
@@ -411,42 +487,36 @@ def predict_json(
     import traceback
     try:
         print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
+        n_limit = normalize_timestep_limit(n_timesteps)
+
+        video_path = None
+        video_orig_name = None
+        stimulus_type = None
+
+        if video is not None:
+            print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
+            print(f"🔵 [predict_json] Video input value: {video!r}")
+            video_path, video_orig_name = resolve_uploaded_video_path(video)
+            print(f"🔵 [predict_json] Validated video_path: {video_path!r}")
+            stimulus_type = "video"
+        elif text and text.strip():
+            print("🔵 [predict_json] Using text")
+            stimulus_type = "text"
+        else:
+            return {"success": False, "error": "Provide either text or video input."}
+
         model = _load_model()
         print("🔵 [predict_json] Model loaded")
 
         # Build events dataframe based on input type
-        if video is not None:
-            print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
-            print(f"🔵 [predict_json] Video input value: {video!r}")
-            
-            if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
-                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
-            print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+        if stimulus_type == "video":
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
             import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
+            if not any(video_path.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                if video_orig_name and any(video_orig_name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                    ext = "." + video_orig_name.rsplit(".", 1)[-1].lower()
                 else:
                     # Default to .mp4 — most common case for browser uploads
                     ext = ".mp4"
@@ -457,9 +527,7 @@ def predict_json(
                 print(f"🔵 [predict_json] Renamed for extension: {video_path}")
             video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
-            stimulus_type = "video"
-        elif text and text.strip():
-            print("🔵 [predict_json] Using text")
+        else:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
                 tmp.write(text.strip())
                 fpath = tmp.name
@@ -467,9 +535,6 @@ def predict_json(
                 df = model.get_events_dataframe(text_path=fpath)
             finally:
                 os.unlink(fpath)
-            stimulus_type = "text"
-        else:
-            return {"success": False, "error": "Provide either text or video input."}
 
         print(f"🔵 [predict_json] Events dataframe: {len(df)} rows")
 
@@ -489,7 +554,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(n_limit, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -561,6 +626,7 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
+    n_limit = normalize_timestep_limit(n_timesteps)
     model = _load_model()
 
     # Build events dataframe based on input modality
@@ -597,7 +663,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_limit, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
