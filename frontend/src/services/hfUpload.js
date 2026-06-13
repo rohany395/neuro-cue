@@ -3,11 +3,11 @@ import { Client, prepare_files } from "@gradio/client";
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 const DEFAULT_SPACE_URL = "https://rohany395-neuro-cue.hf.space/";
-const SPACE_URL = import.meta.env.VITE_SPACE_URL || DEFAULT_SPACE_URL;
+export const SPACE_URL = import.meta.env.VITE_SPACE_URL || DEFAULT_SPACE_URL;
 
 let clientPromise = null;
 
-async function getSpaceClient() {
+export async function getSpaceClient() {
   if (!clientPromise) {
     clientPromise = Client.connect(SPACE_URL);
   }
