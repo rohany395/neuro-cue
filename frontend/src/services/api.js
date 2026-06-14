@@ -28,7 +28,7 @@ export async function checkHealth() {
 /**
  * Submit a stimulus (text OR video) and get structured prediction back.
  *
- * Video: uploads to HF Space first, then POSTs a small JSON payload to the proxy.
+ * Video: uploads to HF Space first, then sends a small JSON payload to the Space API.
  *
  * @param {Object} input
  * @param {"text"|"video"} input.modality
