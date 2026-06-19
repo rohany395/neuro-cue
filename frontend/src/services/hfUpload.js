@@ -7,7 +7,7 @@ const SPACE_URL = import.meta.env.VITE_SPACE_URL || DEFAULT_SPACE_URL;
 
 let clientPromise = null;
 
-async function getSpaceClient() {
+export async function getSpaceClient() {
   if (!clientPromise) {
     clientPromise = Client.connect(SPACE_URL);
   }
