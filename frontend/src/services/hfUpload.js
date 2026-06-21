@@ -7,9 +7,12 @@ const SPACE_URL = import.meta.env.VITE_SPACE_URL || DEFAULT_SPACE_URL;
 
 let clientPromise = null;
 
-async function getSpaceClient() {
+export async function getSpaceClient() {
   if (!clientPromise) {
-    clientPromise = Client.connect(SPACE_URL);
+    clientPromise = Client.connect(SPACE_URL).catch((error) => {
+      clientPromise = null;
+      throw error;
+    });
   }
   return clientPromise;
 }
@@ -47,4 +50,9 @@ export async function uploadVideoToSpace(file) {
     url: fileData.url,
     orig_name: fileData.orig_name || file.name,
   };
+}
+
+export async function predictOnSpace(payload) {
+  const client = await getSpaceClient();
+  return client.predict("/predict_json", payload);
 }
