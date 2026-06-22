@@ -21,6 +21,12 @@ import gradio as gr
 import spaces
 import subprocess
 
+from input_validation import (
+    ensure_video_extension,
+    normalize_timestep_limit,
+    resolve_uploaded_video_path,
+)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
 CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -420,41 +426,15 @@ def predict_json(
             print(f"🔵 [predict_json] Video input value: {video!r}")
             
             if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
                 print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
+
+            video_path, orig_name = resolve_uploaded_video_path(video)
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
-            # TRIBE validates by extension. Gradio uploads strip the extension
-            # (saves as /tmp/gradio/.../blob), so we need to add one back.
-            # Try to detect from orig_name first, fall back to .mp4.
-            import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
-                new_path = video_path + ext
-                shutil.copy(video_path, new_path)
-                video_path = new_path
-                print(f"🔵 [predict_json] Renamed for extension: {video_path}")
+
+            # TRIBE validates by extension. Gradio uploads can strip the
+            # extension, so add one back only after validating the upload path.
+            video_path = ensure_video_extension(video_path, orig_name)
+            print(f"🔵 [predict_json] Extension-normalized video_path: {video_path}")
             video_path = trim_video_if_needed(video_path)
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
@@ -489,7 +469,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(normalize_timestep_limit(n_timesteps), len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -562,9 +542,12 @@ def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
     model = _load_model()
+    n_timesteps = normalize_timestep_limit(n_timesteps)
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        video_file, _ = resolve_uploaded_video_path(video_file)
+        video_file = ensure_video_extension(video_file)
         video_file = trim_video_if_needed(video_file)
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
@@ -597,7 +580,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
