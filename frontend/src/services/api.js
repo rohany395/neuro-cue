@@ -1,33 +1,9 @@
-import { uploadVideoToSpace } from "./hfUpload.js";
+import { getSpaceClient, uploadVideoToSpace } from "./hfUpload.js";
 
-const PREDICT_PROXY_URL = import.meta.env.VITE_PREDICT_PROXY_URL || "/api/predict";
-const PREDICT_API_KEY = import.meta.env.VITE_PREDICT_API_KEY || "";
-
-function predictHeaders(contentType = null) {
-  const headers = {};
-  if (contentType) {
-    headers["Content-Type"] = contentType;
-  }
-  if (PREDICT_API_KEY) {
-    headers["x-neuro-cue-api-key"] = PREDICT_API_KEY;
-  }
-  return headers;
-}
-
-async function parsePredictResponse(res) {
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) {
-    if (res.status === 401 && !PREDICT_API_KEY) {
-      throw new Error(
-        "Missing VITE_PREDICT_API_KEY. Copy .env.local.example and set the same value as PREDICT_API_SECRET.",
-      );
-    }
-    if (res.status === 413) {
-      throw new Error(
-        "Request too large for the API proxy. Video uploads should go directly to Hugging Face — refresh and try again.",
-      );
-    }
-    throw new Error(data?.error || "Prediction failed");
+function parsePredictResult(result) {
+  const data = Array.isArray(result?.data) ? result.data[0] : null;
+  if (!data) {
+    throw new Error("No prediction data returned from Hugging Face.");
   }
   if (data.success === false) {
     throw new Error(data.error || "Prediction failed");
@@ -37,15 +13,11 @@ async function parsePredictResponse(res) {
 
 export async function checkHealth() {
   try {
-    const res = await fetch(PREDICT_PROXY_URL);
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.success) {
-      return {
-        status: data.hfToken?.valid ? "connected" : "error",
-        mock_mode: false,
-      };
-    }
-    return { status: "error" };
+    await getSpaceClient();
+    return {
+      status: "connected",
+      mock_mode: false,
+    };
   } catch {
     return { status: "error" };
   }
@@ -54,7 +26,8 @@ export async function checkHealth() {
 /**
  * Submit a stimulus (text OR video) and get structured prediction back.
  *
- * Video: uploads to HF Space first, then POSTs a small JSON payload to the proxy.
+ * Video: uploads to HF Space first, then sends a small file reference to the
+ * public Space API.
  *
  * @param {Object} input
  * @param {"text"|"video"} input.modality
@@ -75,29 +48,23 @@ export async function predictStimulus({
     const videoRef = await uploadVideoToSpace(videoFile);
 
     onPhase?.("predicting");
-    const res = await fetch(PREDICT_PROXY_URL, {
-      method: "POST",
-      headers: predictHeaders("application/json"),
-      body: JSON.stringify({
-        modality: "video",
-        n_timesteps: nTimesteps,
-        video_ref: videoRef,
-      }),
+    const client = await getSpaceClient();
+    const result = await client.predict("/predict_json", {
+      text: "",
+      n_timesteps: nTimesteps,
+      video: videoRef,
     });
 
-    return parsePredictResponse(res);
+    return parsePredictResult(result);
   }
 
   onPhase?.("predicting");
-  const res = await fetch(PREDICT_PROXY_URL, {
-    method: "POST",
-    headers: predictHeaders("application/json"),
-    body: JSON.stringify({
-      modality: "text",
-      text,
-      n_timesteps: nTimesteps,
-    }),
+  const client = await getSpaceClient();
+  const result = await client.predict("/predict_json", {
+    text,
+    n_timesteps: nTimesteps,
+    video: null,
   });
 
-  return parsePredictResponse(res);
+  return parsePredictResult(result);
 }

@@ -20,6 +20,13 @@ matplotlib.use("Agg")
 import gradio as gr
 import spaces
 import subprocess
+from input_validation import (
+    ensure_video_extension,
+    get_original_name,
+    normalize_text_input,
+    normalize_timestep_limit,
+    resolve_uploaded_video_path,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
@@ -408,68 +415,43 @@ def predict_json(
     Accepts EITHER text input OR a video file. Returns ROI scores +
     per-timestep temporal data + brain HTML.
     """
-    import traceback
     try:
-        print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
-        model = _load_model()
-        print("🔵 [predict_json] Model loaded")
+        text_preview = text[:50] if isinstance(text, str) else ""
+        print(f"🔵 [predict_json] Called with text={text_preview!r}, video={video!r}, n_timesteps={n_timesteps}")
+        n_timesteps = normalize_timestep_limit(n_timesteps)
 
         # Build events dataframe based on input type
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
-            if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
-                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
+
+            video_path = resolve_uploaded_video_path(video)
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
-            # TRIBE validates by extension. Gradio uploads strip the extension
-            # (saves as /tmp/gradio/.../blob), so we need to add one back.
-            # Try to detect from orig_name first, fall back to .mp4.
-            import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
-                new_path = video_path + ext
-                shutil.copy(video_path, new_path)
-                video_path = new_path
-                print(f"🔵 [predict_json] Renamed for extension: {video_path}")
+
+            # TRIBE validates by extension. Gradio uploads often save as an
+            # extensionless blob, so add a safe extension after path validation.
+            video_path = ensure_video_extension(video_path, get_original_name(video))
             video_path = trim_video_if_needed(video_path)
+            model = _load_model()
+            print("🔵 [predict_json] Model loaded")
             df = model.get_events_dataframe(video_path=video_path)
             stimulus_type = "video"
-        elif text and text.strip():
+        else:
+            text = normalize_text_input(text)
+            if not text:
+                return {"success": False, "error": "Provide either text or video input."}
+
             print("🔵 [predict_json] Using text")
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-                tmp.write(text.strip())
+                tmp.write(text)
                 fpath = tmp.name
+            model = _load_model()
+            print("🔵 [predict_json] Model loaded")
             try:
                 df = model.get_events_dataframe(text_path=fpath)
             finally:
                 os.unlink(fpath)
             stimulus_type = "text"
-        else:
-            return {"success": False, "error": "Provide either text or video input."}
 
         print(f"🔵 [predict_json] Events dataframe: {len(df)} rows")
 
@@ -489,7 +471,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -548,7 +530,14 @@ def predict_json(
         print(f"🟢 [predict_json] Returning {len(recommendations)} ROIs, {len(temporal_scores)} timesteps")
         return result
 
+    except ValueError as e:
+        print(f"🔴 [predict_json] INVALID INPUT: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
     except Exception as e:
+        import traceback
         tb = traceback.format_exc()
         print(f"🔴 [predict_json] EXCEPTION: {e}\n{tb}")
         return {
@@ -561,18 +550,34 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
-    model = _load_model()
+    try:
+        n_timesteps = normalize_timestep_limit(n_timesteps)
+    except ValueError as e:
+        raise gr.Error(str(e)) from None
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        try:
+            video_file = resolve_uploaded_video_path(video_file)
+        except ValueError as e:
+            raise gr.Error(str(e)) from None
         video_file = trim_video_if_needed(video_file)
+        model = _load_model()
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
+        model = _load_model()
         df = model.get_events_dataframe(audio_path=audio_file)
-    elif input_type == "Text" and text_input.strip():
+    elif input_type == "Text":
+        try:
+            text_input = normalize_text_input(text_input)
+        except ValueError as e:
+            raise gr.Error(str(e)) from None
+        if not text_input:
+            raise gr.Error("Please provide an input for the selected modality.")
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-            tmp.write(text_input.strip())
+            tmp.write(text_input)
             fpath = tmp.name
+        model = _load_model()
         try:
             df = model.get_events_dataframe(text_path=fpath)
         finally:
@@ -597,7 +602,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
