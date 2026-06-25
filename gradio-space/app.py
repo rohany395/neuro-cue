@@ -10,6 +10,7 @@ os.environ["PYVISTA_OFF_SCREEN"] = "true"
 os.environ["DISPLAY"] = ""
 os.environ["VTK_DEFAULT_RENDER_WINDOW_OFFSCREEN"] = "true"
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,12 @@ matplotlib.use("Agg")
 import gradio as gr
 import spaces
 import subprocess
+from input_validation import (
+    extension_for_video_path,
+    normalize_timestep_limit,
+    resolve_uploaded_video_path,
+    validate_text_input,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE_FOLDER = Path("./cache")
@@ -411,6 +418,7 @@ def predict_json(
     import traceback
     try:
         print(f"🔵 [predict_json] Called with text={text[:50]!r}, video={video!r}, n_timesteps={n_timesteps}")
+        n_timesteps = normalize_timestep_limit(n_timesteps)
         model = _load_model()
         print("🔵 [predict_json] Model loaded")
 
@@ -418,40 +426,16 @@ def predict_json(
         if video is not None:
             print(f"🔵 [predict_json] Video input type: {type(video).__name__}")
             print(f"🔵 [predict_json] Video input value: {video!r}")
-            
-            if isinstance(video, dict):
-                # Try multiple possible keys
-                video_path = (
-                    video.get("path")
-                    or video.get("url")
-                    or video.get("orig_name")
-                )
-                print(f"🔵 [predict_json] Dict keys: {list(video.keys())}")
-            elif isinstance(video, str):
-                video_path = video
-            elif hasattr(video, "name"):
-                video_path = video.name
-            else:
-                return {"success": False, "error": f"Unrecognized video input type: {type(video).__name__}"}
-            
+
+            video_path, orig_name = resolve_uploaded_video_path(video)
             print(f"🔵 [predict_json] Extracted video_path: {video_path!r}")
-            
-            if not video_path:
-                return {"success": False, "error": f"Could not extract video path from: {video!r}"}
-            
+
             # TRIBE validates by extension. Gradio uploads strip the extension
             # (saves as /tmp/gradio/.../blob), so we need to add one back.
             # Try to detect from orig_name first, fall back to .mp4.
-            import shutil
-            if not any(video_path.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                orig_name = video.get("orig_name") if isinstance(video, dict) else None
-                if orig_name and any(orig_name.lower().endswith(ext) for ext in [".mp4", ".mov", ".webm", ".mkv", ".avi"]):
-                    ext = "." + orig_name.rsplit(".", 1)[-1].lower()
-                else:
-                    # Default to .mp4 — most common case for browser uploads
-                    ext = ".mp4"
-                
-                new_path = video_path + ext
+            ext = extension_for_video_path(video_path, orig_name)
+            if ext:
+                new_path = f"{video_path}{ext}"
                 shutil.copy(video_path, new_path)
                 video_path = new_path
                 print(f"🔵 [predict_json] Renamed for extension: {video_path}")
@@ -460,8 +444,9 @@ def predict_json(
             stimulus_type = "video"
         elif text and text.strip():
             print("🔵 [predict_json] Using text")
+            text = validate_text_input(text)
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-                tmp.write(text.strip())
+                tmp.write(text)
                 fpath = tmp.name
             try:
                 df = model.get_events_dataframe(text_path=fpath)
@@ -489,7 +474,7 @@ def predict_json(
         if hasattr(preds, "cpu"):
             preds = preds.cpu().numpy()
 
-        n = min(int(n_timesteps), len(preds))
+        n = min(n_timesteps, len(preds))
         if n == 0:
             return {"success": False, "error": "Model returned no predictions."}
 
@@ -561,17 +546,25 @@ def predict_json(
 def run_prediction(input_type, video_file, audio_file, text_input,
                    n_timesteps, vmin_val):
     """Main inference function. Runs on ZeroGPU."""
+    n_timesteps = normalize_timestep_limit(n_timesteps)
     model = _load_model()
 
     # Build events dataframe based on input modality
     if input_type == "Video" and video_file is not None:
+        video_file, orig_name = resolve_uploaded_video_path(video_file)
+        ext = extension_for_video_path(video_file, orig_name)
+        if ext:
+            new_path = f"{video_file}{ext}"
+            shutil.copy(video_file, new_path)
+            video_file = new_path
         video_file = trim_video_if_needed(video_file)
         df = model.get_events_dataframe(video_path=video_file)
     elif input_type == "Audio" and audio_file is not None:
         df = model.get_events_dataframe(audio_path=audio_file)
     elif input_type == "Text" and text_input.strip():
+        text_input = validate_text_input(text_input)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-            tmp.write(text_input.strip())
+            tmp.write(text_input)
             fpath = tmp.name
         try:
             df = model.get_events_dataframe(text_path=fpath)
@@ -597,7 +590,7 @@ def run_prediction(input_type, video_file, audio_file, text_input,
     if hasattr(preds, "cpu"):
         preds = preds.cpu().numpy()
 
-    n = min(int(n_timesteps), len(preds))
+    n = min(n_timesteps, len(preds))
     if n == 0:
         raise gr.Error("Model returned no predictions for this input.")
 
