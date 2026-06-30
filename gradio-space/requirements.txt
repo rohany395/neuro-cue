@@ -6,6 +6,7 @@ exca>=0.5.20,<0.5.26
 
 # PyTorch (compatible with ZeroGPU Blackwell)
 torch==2.8.0
+torchaudio==2.8.0
 
 # ZeroGPU support
 spaces>=0.19.4
