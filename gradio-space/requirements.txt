@@ -19,10 +19,12 @@ plotly>=5.18.0
 # HF auth
 huggingface_hub>=0.23.0
 
-# tribev2 uses WhisperX via uvx at runtime (tribev2_whisperx_patch.py).
-# Do NOT pip-install whisperx here: faster-whisper pins av==11.* which fails to
-# compile against FFmpeg 7 on Debian Trixie during the Space image build.
-uv>=0.4.0
+# WhisperX stack (tribev2_whisperx_patch.py installs whisperx --no-deps).
+# PyAV 14+ ships cp312 wheels; faster-whisper 1.2+ allows av>=11.
+# pyannote 3.3.2 works with torchaudio 2.8 and numpy 2.x (3.1.1 does not).
+av>=14.2.0,<15
+faster-whisper>=1.2.0,<2
+pyannote.audio==3.3.2
 
 # Brain atlas
 nilearn>=0.11.0
