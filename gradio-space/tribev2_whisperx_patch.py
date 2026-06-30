@@ -5,8 +5,9 @@ Upstream tribev2 runs `uvx whisperx` with no version pin. That pulls the latest
 whisperx + pyannote 4.x, which breaks VAD with:
   AttributeError: 'generator' object has no attribute 'data'
 
-We pin whisperx==3.1.5 (pyannote.audio==3.1.1) and prefer the preinstalled
-`whisperx` CLI from requirements.txt to avoid re-downloading torch on every run.
+We pin whisperx==3.1.5 via uvx (pyannote.audio==3.1.1). whisperx is not installed
+in requirements.txt because its PyAV dependency does not build on HF's FFmpeg 7
+image; uvx installs prebuilt wheels into a cache on first text prediction.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -29,10 +29,7 @@ _PATCHED = False
 
 
 def _whisperx_executable() -> list[str]:
-    """Return argv prefix for whisperx: installed binary or pinned uvx fallback."""
-    binary = shutil.which("whisperx")
-    if binary:
-        return [binary]
+    """Run pinned whisperx via uvx (uses cached wheels, avoids image-build PyAV compile)."""
     return [
         "uvx",
         "--python",
