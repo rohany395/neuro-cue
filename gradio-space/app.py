@@ -115,6 +115,9 @@ def _load_model():
     """Load TRIBE v2 (only inside GPU function due to ZeroGPU)."""
     global _model
     if _model is None:
+        from tribev2_whisperx_patch import apply_tribev2_whisperx_patch
+
+        apply_tribev2_whisperx_patch()
         from tribev2.demo_utils import TribeModel
 
         hf_token = os.environ.get("HF_TOKEN")

@@ -6,6 +6,7 @@ exca>=0.5.20,<0.5.26
 
 # PyTorch (compatible with ZeroGPU Blackwell)
 torch==2.8.0
+torchaudio==2.8.0
 
 # ZeroGPU support
 spaces>=0.19.4
@@ -17,7 +18,10 @@ plotly>=5.18.0
 # HF auth
 huggingface_hub>=0.23.0
 
-# Required: tribev2 uses uvx internally for WhisperX
+# tribev2 calls WhisperX for text/audio word alignment; pin pyannote 3.1.x compat
+whisperx==3.1.5
+
+# Fallback if whisperx CLI is missing (tribev2_whisperx_patch.py)
 uv>=0.4.0
 
 # Brain atlas
