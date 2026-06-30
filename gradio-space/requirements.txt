@@ -1,6 +1,9 @@
 # TRIBE v2 — installed from my fork with relaxed torch upper bound
 tribev2[plotting] @ git+https://github.com/rohany395/tribev2
 
+# neuralset imports exca.steps.base.NoValue; removed in exca 0.5.26 (tribev2#69)
+exca>=0.5.20,<0.5.26
+
 # PyTorch (compatible with ZeroGPU Blackwell)
 torch==2.8.0
 
