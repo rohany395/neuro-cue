@@ -32,6 +32,12 @@ _PATCHED = False
 
 def _ensure_whisperx_installed() -> None:
     """Install whisperx CLI without pulling av==11.* from faster-whisper 1.0.1."""
+    for module in ("nltk", "transformers", "pandas"):
+        if importlib.util.find_spec(module) is None:
+            raise RuntimeError(
+                f"Missing whisperx runtime dependency {module!r}; "
+                "rebuild the Space so requirements.txt is applied."
+            )
     if importlib.util.find_spec("whisperx") is not None:
         return
     logger.info("Installing whisperx==%s (--no-deps)...", WHISPERX_VERSION)

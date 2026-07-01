@@ -25,6 +25,9 @@ huggingface_hub>=0.23.0
 av>=14.2.0,<15
 faster-whisper>=1.2.0,<2
 pyannote.audio==3.3.2
+nltk>=3.8.0
+transformers>=4.30.0
+pandas>=2.0.0
 
 # Brain atlas
 nilearn>=0.11.0
