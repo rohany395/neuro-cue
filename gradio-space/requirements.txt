@@ -25,10 +25,12 @@ huggingface_hub>=0.23.0
 av==12.3.0
 ctranslate2>=4.0,<5
 onnxruntime>=1.14,<2
-tokenizers>=0.13,<0.16
+# TRIBE's Llama 3 text encoder config uses the newer rope_scaling schema
+# (rope_type/high_freq_factor/low_freq_factor), which older transformers reject.
+transformers>=4.43.0,<5
+tokenizers>=0.19,<0.21
 pyannote.audio==3.3.2
 nltk>=3.8.0
-transformers>=4.30.0
 pandas>=2.0.0
 
 # Brain atlas
