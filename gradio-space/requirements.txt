@@ -19,11 +19,13 @@ plotly>=5.18.0
 # HF auth
 huggingface_hub>=0.23.0
 
-# WhisperX stack (tribev2_whisperx_patch.py installs whisperx --no-deps).
-# PyAV 14+ ships cp312 wheels; faster-whisper 1.2+ allows av>=11.
-# pyannote 3.3.2 works with torchaudio 2.8 and numpy 2.x (3.1.1 does not).
-av>=14.2.0,<15
-faster-whisper>=1.2.0,<2
+# WhisperX stack (tribev2_whisperx_patch.py installs whisperx + faster-whisper --no-deps).
+# whisperx 3.1.5 requires faster-whisper==1.0.1 (API incompatible with 1.2+).
+# faster-whisper 1.0.1 pins av==11.* (fails to compile on FFmpeg 7); av 12.3 has wheels.
+av==12.3.0
+ctranslate2>=4.0,<5
+onnxruntime>=1.14,<2
+tokenizers>=0.13,<0.16
 pyannote.audio==3.3.2
 nltk>=3.8.0
 transformers>=4.30.0
